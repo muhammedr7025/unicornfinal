@@ -120,6 +120,7 @@ interface QuoteState {
   // Step 1: Quote settings
   customer_id: string;
   customer_name: string;
+  custom_quote_number: string;
   project_name: string;
   enquiry_id: string;
   agent_commission_pct: number;
@@ -158,6 +159,7 @@ const initialState = {
   currentStep: 0,
   customer_id: '',
   customer_name: '',
+  custom_quote_number: '',
   project_name: '',
   enquiry_id: '',
   agent_commission_pct: 0,

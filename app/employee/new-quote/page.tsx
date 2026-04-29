@@ -330,6 +330,8 @@ export default function NewQuotePage() {
   async function handleSave() {
     // Validations per PRD
     if (!store.customer_id) { toast.error('Please select a customer'); return; }
+    if (!store.project_name.trim()) { toast.error('Project Name is required'); return; }
+    if (!store.enquiry_id.trim()) { toast.error('Enquiry ID is required'); return; }
     if (store.products.length === 0) { toast.error('Please add at least one product'); return; }
     if (store.packing_price <= 0) { toast.error('Packing price is required and must be > 0'); return; }
     if (!store.delivery_text.trim()) { toast.error('Delivery timeline is required'); return; }
@@ -342,11 +344,14 @@ export default function NewQuotePage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // Generate quote number via RPC
-      const fyCode = (await import('@/lib/quoteHelpers')).generateFYCode();
-      const { data: seqData } = await supabase.rpc('get_next_quote_sequence', { p_fy_code: fyCode });
-      const seq = seqData ?? 1;
-      const quoteNumber = (await import('@/lib/quoteHelpers')).formatQuoteNumber(fyCode, seq);
+      // Generate or use custom quote number
+      let quoteNumber = store.custom_quote_number.trim();
+      if (!quoteNumber) {
+        const fyCode = (await import('@/lib/quoteHelpers')).generateFYCode();
+        const { data: seqData } = await supabase.rpc('get_next_quote_sequence', { p_fy_code: fyCode });
+        const seq = seqData ?? 1;
+        quoteNumber = (await import('@/lib/quoteHelpers')).formatQuoteNumber(fyCode, seq);
+      }
 
       // Calculate totals
       const customer = customers.find(c => c.id === store.customer_id);
@@ -366,6 +371,8 @@ export default function NewQuotePage() {
         customer_id: store.customer_id,
         created_by: user.id,
         pricing_mode: store.pricing_mode,
+        project_name: store.project_name.trim() || null,
+        enquiry_id: store.enquiry_id.trim() || null,
         validity_days: store.validity_days,
         delivery_text: store.delivery_text,
         payment_advance_pct: store.payment_advance_pct,
@@ -476,6 +483,8 @@ export default function NewQuotePage() {
   function validateStep(step: number): boolean {
     if (step === 0) {
       if (!store.customer_id) { toast.error('Please select a customer'); return false; }
+      if (!store.project_name.trim()) { toast.error('Project Name is required'); return false; }
+      if (!store.enquiry_id.trim()) { toast.error('Enquiry ID is required'); return false; }
       if (store.packing_price <= 0) { toast.error('Packing price is required and must be > 0'); return false; }
       if (!store.delivery_text.trim()) { toast.error('Delivery timeline is required (e.g. "4-6 working weeks")'); return false; }
       if (store.pricing_type === 'for-site' && store.freight_price <= 0) { toast.error('Freight price is required for F.O.R. pricing'); return false; }
@@ -643,13 +652,18 @@ function StepSettings({ customers }: { customers: Customer[] }) {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label>Project Name</Label>
+                <Label>Project Name *</Label>
                 <Input value={store.project_name} onChange={(e) => store.setQuoteSettings({ project_name: e.target.value })} placeholder="e.g. IOCL Refinery" />
               </div>
               <div className="space-y-2">
-                <Label>Enquiry ID</Label>
+                <Label>Enquiry ID *</Label>
                 <Input value={store.enquiry_id} onChange={(e) => store.setQuoteSettings({ enquiry_id: e.target.value })} placeholder="e.g. ENQ-2026-001" />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Custom Quote Number <span className="text-muted-foreground text-xs">(optional)</span></Label>
+              <Input value={store.custom_quote_number} onChange={(e) => store.setQuoteSettings({ custom_quote_number: e.target.value })} placeholder="Leave blank for auto-generated" />
+              <p className="text-xs text-muted-foreground">If left empty, a quote number will be auto-generated on save.</p>
             </div>
           </CardContent>
         </Card>
