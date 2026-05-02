@@ -14,7 +14,7 @@ import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import {
   ChevronLeft, ChevronRight, Plus, Trash2, Copy, Save, Loader2,
-  Settings2, Package, Calculator, CheckCircle
+  Settings2, Package, Calculator, CheckCircle, FileText, AlertTriangle
 } from 'lucide-react';
 import { calculateProductPrice, calculateQuoteTotal, roundToNearest10, convertToUSD } from '@/lib/pricingEngine';
 import type { Customer } from '@/types';
@@ -32,8 +32,9 @@ type SealRingRow = { series_id: string; seal_type: string; size: string; rating:
 type MachiningTypeRow = { component: string; series_id: string; type_key: string; size: string; rating: string };
 
 const STEPS = [
-  { label: 'Quote Settings', icon: Settings2 },
+  { label: 'Customer & Project', icon: Settings2 },
   { label: 'Products', icon: Package },
+  { label: 'Terms & Pricing', icon: FileText },
   { label: 'Review & Save', icon: CheckCircle },
 ];
 
@@ -59,7 +60,9 @@ export default function NewQuotePage() {
   const [exchangeRate, setExchangeRate] = useState(83.5);
 
   useEffect(() => {
-    store.reset();
+    if (!store.edit_mode) {
+      store.reset();
+    }
     loadInitialData();
   }, []);
 
@@ -310,8 +313,32 @@ export default function NewQuotePage() {
         line_total: result.lineTotal,
       });
 
+      // ---- Check for critical errors (zero costs that shouldn't be zero) ----
+      const criticalMissing: string[] = [];
+      if (bodyCost === 0 && bodyW) criticalMissing.push('Body material price is ₹0');
+      if (bonnetCost === 0 && bonnetW) criticalMissing.push('Bonnet material price is ₹0');
+      if (!bodyW) criticalMissing.push('Body weight data missing');
+      if (!bonnetW) criticalMissing.push('Bonnet weight data missing');
+      if (machCosts['body'] === 0) criticalMissing.push('Body machining cost missing');
+      if (machCosts['bonnet'] === 0) criticalMissing.push('Bonnet machining cost missing');
+      if (machCosts['plug'] === 0 && product.plug_material_id) criticalMissing.push('Plug machining cost missing');
+      if (machCosts['seat'] === 0 && product.seat_material_id) criticalMissing.push('Seat machining cost missing');
+
+      const hasCritical = criticalMissing.length > 0;
+
+      // Store warnings on the product for display
+      store.updateProduct(productId, {
+        pricing_warnings: [...warnings, ...criticalMissing],
+        has_pricing_errors: hasCritical,
+      });
+
       // ---- Show result with warnings ----
-      if (warnings.length > 0) {
+      if (hasCritical) {
+        toast.error(
+          `⚠️ PRICING DATA MISSING — Cannot use this price.\n${criticalMissing.join('\n')}\n\nPlease contact the administrator to add the missing pricing data.`,
+          { duration: 15000 }
+        );
+      } else if (warnings.length > 0) {
         toast.warning(
           `Price: ₹${result.unitPrice.toLocaleString('en-IN')} — but ${warnings.length} data gap(s) found (used ₹0 for missing items)`,
           { duration: 8000, description: warnings.join('\n') }
@@ -333,9 +360,16 @@ export default function NewQuotePage() {
     if (!store.project_name.trim()) { toast.error('Project Name is required'); return; }
     if (!store.enquiry_id.trim()) { toast.error('Enquiry ID is required'); return; }
     if (store.products.length === 0) { toast.error('Please add at least one product'); return; }
+    // Check for pricing errors
+    const errorProducts = store.products.filter(p => p.has_pricing_errors);
+    if (errorProducts.length > 0) {
+      toast.error(`${errorProducts.length} product(s) have pricing data errors. Please fix them or contact the administrator.`);
+      return;
+    }
     if (store.packing_price <= 0) { toast.error('Packing price is required and must be > 0'); return; }
     if (!store.delivery_text.trim()) { toast.error('Delivery timeline is required'); return; }
     if (store.pricing_type === 'for-site' && store.freight_price <= 0) { toast.error('Freight price is required for F.O.R. pricing'); return; }
+    if (store.pricing_type === 'custom' && !store.custom_pricing_title.trim()) { toast.error('Custom pricing title is required'); return; }
     const paymentTotal = store.payment_advance_pct + store.payment_approval_pct + store.payment_despatch_pct;
     if (paymentTotal !== 100) { toast.error('Payment terms must total exactly 100%'); return; }
 
@@ -356,17 +390,19 @@ export default function NewQuotePage() {
       // Calculate totals
       const customer = customers.find(c => c.id === store.customer_id);
       const lineItems = store.products.map(p => ({ lineTotal: p.line_total }));
+      const customItems = store.pricing_type === 'custom' && store.custom_pricing_title.trim()
+        ? [{ name: store.custom_pricing_title, price: store.custom_pricing_price }]
+        : [];
       const quoteTotal = calculateQuoteTotal(
         lineItems,
         store.pricing_type,
         store.freight_price,
-        [],
+        customItems,
         store.packing_price,
         customer?.is_international ?? false
       );
 
-      // Insert quote
-      const { data: quote, error: quoteErr } = await supabase.from('quotes').insert({
+      const quotePayload = {
         quote_number: quoteNumber,
         customer_id: store.customer_id,
         created_by: user.id,
@@ -381,15 +417,39 @@ export default function NewQuotePage() {
         warranty_shipment_months: store.warranty_shipment_months,
         warranty_installation_months: store.warranty_installation_months,
         pricing_type: store.pricing_type,
+        custom_pricing_title: store.pricing_type === 'custom' ? store.custom_pricing_title.trim() : null,
+        custom_pricing_price: store.pricing_type === 'custom' ? store.custom_pricing_price : 0,
         freight_price: store.freight_price,
         packing_price: store.packing_price,
+        exchange_rate_snapshot: exchangeRate,
         notes: store.notes || null,
         subtotal_inr: quoteTotal.subtotal,
         tax_amount_inr: quoteTotal.taxAmount,
         grand_total_inr: quoteTotal.grandTotal,
-      }).select('id').single();
+      };
 
-      if (quoteErr) throw quoteErr;
+      let quote: { id: string } | null = null;
+
+      if (store.edit_mode && store.edit_quote_id) {
+        // ── EDIT MODE: Update existing quote ──
+        const { error: updErr } = await supabase.from('quotes')
+          .update(quotePayload)
+          .eq('id', store.edit_quote_id);
+        if (updErr) throw updErr;
+        quote = { id: store.edit_quote_id };
+
+        // Delete old products (cascade deletes tubing/testing/accessories)
+        await supabase.from('quote_products').delete().eq('quote_id', store.edit_quote_id);
+      } else {
+        // ── CREATE MODE: Insert new quote ──
+        const { data: newQuote, error: quoteErr } = await supabase.from('quotes')
+          .insert(quotePayload)
+          .select('id').single();
+        if (quoteErr) throw quoteErr;
+        quote = newQuote;
+      }
+
+      if (!quote) throw new Error('Failed to save quote');
 
       // Insert products
       for (let i = 0; i < store.products.length; i++) {
@@ -462,9 +522,9 @@ export default function NewQuotePage() {
         }
       }
 
-      toast.success(`Quote ${quoteNumber} created!`);
+      toast.success(store.edit_mode ? `Quote ${quoteNumber} updated!` : `Quote ${quoteNumber} created!`);
       store.reset();
-      router.push('/employee/quotes');
+      router.push(store.edit_mode ? `/employee/quotes/${store.edit_quote_id}` : '/employee/quotes');
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Save failed');
     } finally {
@@ -481,17 +541,14 @@ export default function NewQuotePage() {
   }
   // ── Step Validators ──
   function validateStep(step: number): boolean {
+    // Step 0: Customer & Project
     if (step === 0) {
       if (!store.customer_id) { toast.error('Please select a customer'); return false; }
       if (!store.project_name.trim()) { toast.error('Project Name is required'); return false; }
       if (!store.enquiry_id.trim()) { toast.error('Enquiry ID is required'); return false; }
-      if (store.packing_price <= 0) { toast.error('Packing price is required and must be > 0'); return false; }
-      if (!store.delivery_text.trim()) { toast.error('Delivery timeline is required (e.g. "4-6 working weeks")'); return false; }
-      if (store.pricing_type === 'for-site' && store.freight_price <= 0) { toast.error('Freight price is required for F.O.R. pricing'); return false; }
-      const paymentTotal = store.payment_advance_pct + store.payment_approval_pct + store.payment_despatch_pct;
-      if (paymentTotal !== 100) { toast.error(`Payment terms must total 100% (currently ${paymentTotal}%)`); return false; }
       return true;
     }
+    // Step 1: Products
     if (step === 1) {
       if (store.products.length === 0) { toast.error('Please add at least one product'); return false; }
       for (let i = 0; i < store.products.length; i++) {
@@ -508,10 +565,21 @@ export default function NewQuotePage() {
         if (!p.seat_material_id) { toast.error(`${label}: Please select Seat Material`); return false; }
         if (!p.stem_material_id) { toast.error(`${label}: Please select Stem Material`); return false; }
         if (p.quantity < 1) { toast.error(`${label}: Quantity must be at least 1`); return false; }
-        if (p.has_actuator && !p.actuator_model_id) { toast.error(`${label}: Please complete all Actuator selections (Type → Series → Model → Material)`); return false; }
-        if (p.has_handwheel && !p.handwheel_model_id) { toast.error(`${label}: Please complete all Handwheel selections (Type → Series → Model → Material)`); return false; }
+        if (p.has_actuator && !p.actuator_model_id) { toast.error(`${label}: Please complete all Actuator selections`); return false; }
+        if (p.has_handwheel && !p.handwheel_model_id) { toast.error(`${label}: Please complete all Handwheel selections`); return false; }
         if (p.unit_price <= 0) { toast.error(`${label}: Please click "Calculate Price" before proceeding`); return false; }
+        if (p.has_pricing_errors) { toast.error(`${label}: Has pricing data errors. Please fix or contact administrator.`); return false; }
       }
+      return true;
+    }
+    // Step 2: Terms & Pricing
+    if (step === 2) {
+      if (store.packing_price <= 0) { toast.error('Packing price is required and must be > 0'); return false; }
+      if (!store.delivery_text.trim()) { toast.error('Delivery timeline is required (e.g. "4-6 working weeks")'); return false; }
+      if (store.pricing_type === 'for-site' && store.freight_price <= 0) { toast.error('Freight price is required for F.O.R. pricing'); return false; }
+      if (store.pricing_type === 'custom' && !store.custom_pricing_title.trim()) { toast.error('Custom pricing title is required'); return false; }
+      const paymentTotal = store.payment_advance_pct + store.payment_approval_pct + store.payment_despatch_pct;
+      if (paymentTotal !== 100) { toast.error(`Payment terms must total 100% (currently ${paymentTotal}%)`); return false; }
       return true;
     }
     return true;
@@ -521,8 +589,8 @@ export default function NewQuotePage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Create New Quote</h1>
-          <p className="text-muted-foreground text-sm mt-1">Step {store.currentStep + 1} of {STEPS.length}</p>
+          <h1 className="text-2xl font-bold tracking-tight">{store.edit_mode ? 'Edit Quote' : 'Create New Quote'}</h1>
+          <p className="text-muted-foreground text-sm mt-1">Step {store.currentStep + 1} of {STEPS.length}{store.edit_mode && ` • Editing ${store.custom_quote_number}`}</p>
         </div>
       </div>
 
@@ -563,12 +631,15 @@ export default function NewQuotePage() {
 
       {/* Step Content */}
       {store.currentStep === 0 && (
-        <StepSettings customers={customers} />
+        <StepCustomerProject customers={customers} />
       )}
       {store.currentStep === 1 && (
         <StepProducts series={series} materials={materials} lookupCosts={lookupCosts} customers={customers} exchangeRate={exchangeRate} bodyWeights={bodyWeights} bonnetWeights={bonnetWeights} actuatorModels={actuatorModels} handwheelPrices={handwheelPrices} calculatingId={calculatingId} testingPresets={testingPresets} tubingPresets={tubingPresets} sealRingRows={sealRingRows} machiningTypeRows={machiningTypeRows} />
       )}
       {store.currentStep === 2 && (
+        <StepTermsPricing customers={customers} />
+      )}
+      {store.currentStep === 3 && (
         <StepReview customers={customers} saving={saving} onSave={handleSave} exchangeRate={exchangeRate} />
       )}
 
@@ -592,7 +663,7 @@ export default function NewQuotePage() {
         ) : (
           <Button onClick={handleSave} disabled={saving} className="gap-2">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Save Quote
+            {store.edit_mode ? 'Update Quote' : 'Save Quote'}
           </Button>
         )}
       </div>
@@ -601,10 +672,88 @@ export default function NewQuotePage() {
 }
 
 // ===================================================================
-// STEP 1: Quote Settings
+// STEP 1: Customer & Project
 // ===================================================================
 
-function StepSettings({ customers }: { customers: Customer[] }) {
+function StepCustomerProject({ customers }: { customers: Customer[] }) {
+  const store = useQuoteStore();
+  const selectedCustomer = customers.find(c => c.id === store.customer_id);
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      <Card>
+        <CardHeader><CardTitle className="text-base">Customer & Project Details</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Customer *</Label>
+            <Select value={store.customer_id} onValueChange={(v) => {
+              const c = customers.find(c => c.id === v);
+              store.setQuoteSettings({
+                customer_id: v ?? '',
+                customer_name: c?.name ?? '',
+                agent_commission_pct: c?.customer_type === 'dealer' ? (c?.commission_pct ?? 0) : 0,
+              });
+            }}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select customer">
+                  {(() => { const c = customers.find(c => c.id === store.customer_id); return c ? `${c.name}${c.company ? ` (${c.company})` : ''}${c.is_international ? ' 🌍' : ''}` : 'Select customer'; })()}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {customers.map(c => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name} {c.company ? `(${c.company})` : ''}
+                    {c.is_international && ' 🌍'}
+                    {c.customer_type === 'dealer' && ' 🤝'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedCustomer && (
+              <div className="flex gap-2 flex-wrap">
+                <Badge variant="outline" className="text-xs">{selectedCustomer.customer_type === 'dealer' ? 'Dealer' : 'Direct'}</Badge>
+                <Badge variant="outline" className="text-xs">{selectedCustomer.is_international ? 'International (USD)' : 'India (INR)'}</Badge>
+                {selectedCustomer.gstin && <Badge variant="outline" className="text-xs">GSTIN: {selectedCustomer.gstin}</Badge>}
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Project Name *</Label>
+              <Input value={store.project_name} onChange={(e) => store.setQuoteSettings({ project_name: e.target.value })} placeholder="e.g. IOCL Refinery" />
+            </div>
+            <div className="space-y-2">
+              <Label>Enquiry ID *</Label>
+              <Input value={store.enquiry_id} onChange={(e) => store.setQuoteSettings({ enquiry_id: e.target.value })} placeholder="e.g. ENQ-2026-001" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Custom Quote Number <span className="text-muted-foreground text-xs">(optional)</span></Label>
+            <Input value={store.custom_quote_number} onChange={(e) => store.setQuoteSettings({ custom_quote_number: e.target.value })} placeholder="Leave blank for auto-generated" />
+            <p className="text-xs text-muted-foreground">If left empty, a quote number will be auto-generated on save.</p>
+          </div>
+          <div className="space-y-2">
+            <Label>Pricing Mode</Label>
+            <Select value={store.pricing_mode} onValueChange={(v) => store.setQuoteSettings({ pricing_mode: (v ?? 'standard') as 'standard' | 'project' })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="standard">Standard</SelectItem>
+                <SelectItem value="project">Project</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">Standard uses default margins, Project uses project-specific margins.</p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ===================================================================
+// STEP 3: Terms & Pricing
+// ===================================================================
+
+function StepTermsPricing({ customers }: { customers: Customer[] }) {
   const store = useQuoteStore();
   const selectedCustomer = customers.find(c => c.id === store.customer_id);
   const isDealer = selectedCustomer?.customer_type === 'dealer';
@@ -612,88 +761,43 @@ function StepSettings({ customers }: { customers: Customer[] }) {
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
-      {/* Left column: Customer & Project */}
+      {/* Left column: Pricing & Charges */}
       <div className="space-y-6">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Customer & Project</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Customer *</Label>
-              <Select value={store.customer_id} onValueChange={(v) => {
-                const c = customers.find(c => c.id === v);
-                store.setQuoteSettings({
-                  customer_id: v ?? '',
-                  customer_name: c?.name ?? '',
-                  agent_commission_pct: c?.customer_type === 'dealer' ? (c?.commission_pct ?? 0) : 0,
-                });
-              }}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select customer">
-                    {(() => { const c = customers.find(c => c.id === store.customer_id); return c ? `${c.name}${c.company ? ` (${c.company})` : ''}${c.is_international ? ' 🌍' : ''}` : 'Select customer'; })()}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {customers.map(c => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name} {c.company ? `(${c.company})` : ''}
-                      {c.is_international && ' 🌍'}
-                      {c.customer_type === 'dealer' && ' 🤝'}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {selectedCustomer && (
-                <div className="flex gap-2 flex-wrap">
-                  <Badge variant="outline" className="text-xs">{selectedCustomer.customer_type === 'dealer' ? 'Dealer' : 'Direct'}</Badge>
-                  <Badge variant="outline" className="text-xs">{selectedCustomer.is_international ? 'International (USD)' : 'India (INR)'}</Badge>
-                  {selectedCustomer.gstin && <Badge variant="outline" className="text-xs">GSTIN: {selectedCustomer.gstin}</Badge>}
-                </div>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Project Name *</Label>
-                <Input value={store.project_name} onChange={(e) => store.setQuoteSettings({ project_name: e.target.value })} placeholder="e.g. IOCL Refinery" />
-              </div>
-              <div className="space-y-2">
-                <Label>Enquiry ID *</Label>
-                <Input value={store.enquiry_id} onChange={(e) => store.setQuoteSettings({ enquiry_id: e.target.value })} placeholder="e.g. ENQ-2026-001" />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Custom Quote Number <span className="text-muted-foreground text-xs">(optional)</span></Label>
-              <Input value={store.custom_quote_number} onChange={(e) => store.setQuoteSettings({ custom_quote_number: e.target.value })} placeholder="Leave blank for auto-generated" />
-              <p className="text-xs text-muted-foreground">If left empty, a quote number will be auto-generated on save.</p>
-            </div>
-          </CardContent>
-        </Card>
-
         <Card>
           <CardHeader><CardTitle className="text-base">Pricing & Charges</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Pricing Mode</Label>
-                <Select value={store.pricing_mode} onValueChange={(v) => store.setQuoteSettings({ pricing_mode: (v ?? 'standard') as 'standard' | 'project' })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="standard">Standard</SelectItem>
-                    <SelectItem value="project">Project</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Pricing Type</Label>
-                <Select value={store.pricing_type} onValueChange={(v) => store.setQuoteSettings({ pricing_type: (v ?? 'ex-works') as 'ex-works' | 'for-site' | 'custom' })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ex-works">Ex-Works</SelectItem>
-                    <SelectItem value="for-site">F.O.R. Site</SelectItem>
-                    <SelectItem value="custom">Custom</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <Label>Pricing Type</Label>
+              <Select value={store.pricing_type} onValueChange={(v) => store.setQuoteSettings({ pricing_type: (v ?? 'ex-works') as 'ex-works' | 'for-site' | 'custom' })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ex-works">Ex-Works</SelectItem>
+                  <SelectItem value="for-site">F.O.R. Site</SelectItem>
+                  <SelectItem value="custom">Custom</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+
+            {/* Custom pricing — single title + price */}
+            {store.pricing_type === 'custom' && (
+              <div className="rounded-lg border-2 border-violet-200 bg-violet-50/30 dark:bg-violet-950/10 p-4 space-y-3">
+                <p className="text-xs font-bold text-violet-800 dark:text-violet-400 uppercase tracking-wider">Custom Pricing Item</p>
+                <div className="space-y-2">
+                  <Label className="text-xs">Title *</Label>
+                  <Input value={store.custom_pricing_title} onChange={(e) => store.setQuoteSettings({ custom_pricing_title: e.target.value })} placeholder="e.g. Installation Charges, Supervision Charges" />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Price (₹) *</Label>
+                  <Input type="number" min="0" value={store.custom_pricing_price || ''} onChange={(e) => store.setQuoteSettings({ custom_pricing_price: e.target.value === '' ? 0 : Number(e.target.value) })} placeholder="0" />
+                </div>
+                {store.custom_pricing_title && store.custom_pricing_price > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {store.custom_pricing_title}: <strong>₹{store.custom_pricing_price.toLocaleString('en-IN')}</strong>
+                  </p>
+                )}
+              </div>
+            )}
+
             {isDealer && (
               <div className="space-y-2">
                 <Label>Agent Commission %</Label>
@@ -1440,7 +1544,7 @@ function StepProducts({
                   {calculatingId === product.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Calculator className="w-3.5 h-3.5" />}
                   {calculatingId === product.id ? 'Calculating...' : 'Calculate Price'}
                 </Button>
-                {product.unit_price > 0 && (
+                {product.unit_price > 0 && !product.has_pricing_errors && (
                   <div className="ml-auto text-right">
                     <p className="text-xs text-muted-foreground">Unit Price</p>
                     <p className="text-lg font-bold">{fmt(product.unit_price)}</p>
@@ -1450,6 +1554,30 @@ function StepProducts({
                   </div>
                 )}
               </div>
+              {/* Pricing error warnings */}
+              {product.has_pricing_errors && product.pricing_warnings.length > 0 && (
+                <div className="mt-3 rounded-lg border-2 border-red-300 bg-red-50 dark:bg-red-950/20 p-3 space-y-1">
+                  <div className="flex items-center gap-2 text-red-700 dark:text-red-400">
+                    <AlertTriangle className="w-4 h-4" />
+                    <p className="text-xs font-bold uppercase">Pricing Data Missing — Cannot Save</p>
+                  </div>
+                  <ul className="text-xs text-red-600 dark:text-red-400 space-y-0.5 list-disc list-inside">
+                    {product.pricing_warnings.map((w, wi) => <li key={wi}>{w}</li>)}
+                  </ul>
+                  <p className="text-xs font-medium text-red-700 dark:text-red-400 mt-1">
+                    ⚠️ Please contact the administrator to add the missing pricing data.
+                  </p>
+                </div>
+              )}
+              {/* Non-critical warnings */}
+              {!product.has_pricing_errors && product.pricing_warnings.length > 0 && (
+                <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3">
+                  <p className="text-xs font-bold text-amber-700 dark:text-amber-400 mb-1">⚠ {product.pricing_warnings.length} data gap(s) — ₹0 used for missing items</p>
+                  <ul className="text-xs text-amber-600 dark:text-amber-400 space-y-0.5 list-disc list-inside">
+                    {product.pricing_warnings.map((w, wi) => <li key={wi}>{w}</li>)}
+                  </ul>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -1462,7 +1590,7 @@ function StepProducts({
 }
 
 // ===================================================================
-// STEP 3: Review & Save
+// STEP 4: Review & Save
 // ===================================================================
 
 function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Customer[]; saving: boolean; onSave: () => void; exchangeRate: number }) {
@@ -1473,7 +1601,8 @@ function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Cu
   const subtotal = store.products.reduce((s, p) => s + p.line_total, 0);
   const freight = store.pricing_type !== 'ex-works' ? store.freight_price : 0;
   const packing = store.packing_price;
-  const taxableAmount = subtotal + freight + packing;
+  const customCharge = store.pricing_type === 'custom' ? store.custom_pricing_price : 0;
+  const taxableAmount = subtotal + freight + packing + customCharge;
   const taxAmount = Math.round(taxableAmount * taxPct / 100);
   const grandTotal = taxableAmount + taxAmount;
 
@@ -1505,6 +1634,9 @@ function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Cu
             <div className="flex justify-between"><span className="text-muted-foreground">Products ({store.products.length})</span><span>{fmt(subtotal)}</span></div>
             {freight > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Freight</span><span>{fmt(freight)}</span></div>}
             {packing > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Packing</span><span>{fmt(packing)}</span></div>}
+            {store.pricing_type === 'custom' && store.custom_pricing_title && customCharge > 0 && (
+              <div className="flex justify-between"><span className="text-muted-foreground">{store.custom_pricing_title}</span><span>{fmt(customCharge)}</span></div>
+            )}
             <Separator />
             <div className="flex justify-between"><span className="text-muted-foreground">Taxable Amount</span><span>{fmt(taxableAmount)}</span></div>
             {!isIntl && (

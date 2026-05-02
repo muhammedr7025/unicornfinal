@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { toast } from 'sonner';
-import { Download, Loader2, ArrowLeft, FileSpreadsheet, Shield, Truck, CreditCard, DollarSign, ChevronDown, FileText } from 'lucide-react';
+import { Download, Loader2, ArrowLeft, FileSpreadsheet, Shield, Truck, CreditCard, DollarSign, ChevronDown, FileText, Pencil } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import Link from 'next/link';
 import { use } from 'react';
@@ -129,6 +129,13 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {quote.status === 'draft' && (
+            <Link href={`/employee/quotes/${id}/edit`}>
+              <Button variant="outline" className="gap-2">
+                <Pencil className="w-4 h-4" /> Edit Quote
+              </Button>
+            </Link>
+          )}
           <Button variant="outline" onClick={downloadExcel} disabled={downloadingExcel} className="gap-2">
             {downloadingExcel ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
             Export Excel
@@ -315,6 +322,15 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
                       <TableCell colSpan={isIntl ? 6 : 5} className="text-right font-medium">Freight Charges:</TableCell>
                       {isIntl && <TableCell className="text-right font-medium text-blue-600 dark:text-blue-400">{fmtUSD(freightPrice)}</TableCell>}
                       <TableCell className="text-right font-medium">{fmtINR(freightPrice)}</TableCell>
+                    </TableRow>
+                  )}
+
+                  {/* Custom pricing row */}
+                  {quote.pricing_type === 'custom' && quote.custom_pricing_title && Number(quote.custom_pricing_price ?? 0) > 0 && (
+                    <TableRow className="bg-muted/20">
+                      <TableCell colSpan={isIntl ? 6 : 5} className="text-right font-medium">{quote.custom_pricing_title}:</TableCell>
+                      {isIntl && <TableCell className="text-right font-medium text-blue-600 dark:text-blue-400">{fmtUSD(Number(quote.custom_pricing_price))}</TableCell>}
+                      <TableCell className="text-right font-medium">{fmtINR(Number(quote.custom_pricing_price))}</TableCell>
                     </TableRow>
                   )}
 

@@ -87,6 +87,8 @@ interface QuotePDFProps {
     warranty_installation_months: number;
     freight_price: number;
     packing_price: number;
+    custom_pricing_title?: string;
+    custom_pricing_price: number;
     subtotal_inr: number;
     tax_amount_inr: number;
     grand_total_inr: number;
@@ -183,6 +185,7 @@ export function QuotePDF({ quote, customer, products, company, exchangeRate }: Q
           <View style={s.summaryRow}><Text style={s.summaryLabel}>Subtotal</Text><Text style={s.summaryValue}>{formatCurrency(quote.subtotal_inr)}</Text></View>
           {quote.freight_price > 0 && <View style={s.summaryRow}><Text style={s.summaryLabel}>Freight</Text><Text style={s.summaryValue}>{formatCurrency(quote.freight_price)}</Text></View>}
           {quote.packing_price > 0 && <View style={s.summaryRow}><Text style={s.summaryLabel}>Packing</Text><Text style={s.summaryValue}>{formatCurrency(quote.packing_price)}</Text></View>}
+          {quote.custom_pricing_title && quote.custom_pricing_price > 0 && <View style={s.summaryRow}><Text style={s.summaryLabel}>{quote.custom_pricing_title}</Text><Text style={s.summaryValue}>{formatCurrency(quote.custom_pricing_price)}</Text></View>}
           {!isIntl && <View style={s.summaryRow}><Text style={s.summaryLabel}>GST (18%)</Text><Text style={s.summaryValue}>{formatCurrency(quote.tax_amount_inr)}</Text></View>}
           {isIntl && <View style={s.summaryRow}><Text style={s.summaryLabel}>GST</Text><Text style={s.summaryValue}>N/A</Text></View>}
           <View style={s.summaryTotal}>

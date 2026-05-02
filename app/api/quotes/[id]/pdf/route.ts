@@ -69,6 +69,8 @@ export async function GET(
           warranty_installation_months: quote.warranty_installation_months,
           freight_price: Number(quote.freight_price ?? 0),
           packing_price: Number(quote.packing_price ?? 0),
+          custom_pricing_title: quote.custom_pricing_title ?? undefined,
+          custom_pricing_price: Number(quote.custom_pricing_price ?? 0),
           subtotal_inr: Number(quote.subtotal_inr ?? 0),
           tax_amount_inr: Number(quote.tax_amount_inr ?? 0),
           grand_total_inr: Number(quote.grand_total_inr ?? 0),
