@@ -316,14 +316,25 @@ export default function NewQuotePage() {
 
       // ---- Check for critical errors (zero costs that shouldn't be zero) ----
       const criticalMissing: string[] = [];
-      if (bodyCost === 0 && bodyW) criticalMissing.push('Body material price is ₹0');
-      if (bonnetCost === 0 && bonnetW) criticalMissing.push('Bonnet material price is ₹0');
-      if (!bodyW) criticalMissing.push('Body weight data missing');
-      if (!bonnetW) criticalMissing.push('Bonnet weight data missing');
-      if (machCosts['body'] === 0) criticalMissing.push('Body machining cost missing');
-      if (machCosts['bonnet'] === 0) criticalMissing.push('Bonnet machining cost missing');
-      if (machCosts['plug'] === 0 && product.plug_material_id) criticalMissing.push('Plug machining cost missing');
-      if (machCosts['seat'] === 0 && product.seat_material_id) criticalMissing.push('Seat machining cost missing');
+      // Body
+      if (!bodyW) criticalMissing.push('Body weight data missing — contact administrator');
+      else if (bodyCost === 0) criticalMissing.push('Body material price is ₹0 — contact administrator');
+      if (machCosts['body'] === 0) criticalMissing.push('Body machining cost missing — contact administrator');
+      // Bonnet
+      if (!bonnetW) criticalMissing.push('Bonnet weight data missing — contact administrator');
+      else if (bonnetCost === 0) criticalMissing.push('Bonnet material price is ₹0 — contact administrator');
+      if (machCosts['bonnet'] === 0) criticalMissing.push('Bonnet machining cost missing — contact administrator');
+      // Plug
+      if (product.plug_material_id && machCosts['plug'] === 0) criticalMissing.push('Plug machining cost missing — contact administrator');
+      // Seat
+      if (product.seat_material_id && machCosts['seat'] === 0) criticalMissing.push('Seat machining cost missing — contact administrator');
+      // Stem
+      if (product.stem_material_id && machCosts['stem'] === 0) criticalMissing.push('Stem machining cost missing — contact administrator');
+      // Cage
+      if (product.cage_material_id && machCosts['cage'] === 0) criticalMissing.push('Cage machining cost missing — contact administrator');
+      // Seal Ring
+      if (product.seal_ring_type && !sealP) criticalMissing.push(`Seal Ring price not found (${product.seal_ring_type}) — contact administrator`);
+
 
       const hasCritical = criticalMissing.length > 0;
 
