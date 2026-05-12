@@ -34,7 +34,8 @@ type MachiningTypeRow = { component: string; series_id: string; type_key: string
 const STEPS = [
   { label: 'Customer & Project', icon: Settings2 },
   { label: 'Products', icon: Package },
-  { label: 'Terms & Pricing', icon: FileText },
+  { label: 'Line Items & Pricing', icon: Calculator },
+  { label: 'Terms & Conditions', icon: FileText },
   { label: 'Review & Save', icon: CheckCircle },
 ];
 
@@ -256,7 +257,7 @@ export default function NewQuotePage() {
       const plugCost = (plugW?.weight_kg ?? 0) * (plugMat?.price_per_kg ?? 0) + machCosts['plug'];
       const seatCost = (seatW?.weight_kg ?? 0) * (seatMat?.price_per_kg ?? 0) + machCosts['seat'];
       const stemCost = (stemW?.weight_kg ?? 0) * (stemMat?.price_per_kg ?? 0) + machCosts['stem'];
-      const cageCost = (cageW?.weight_kg ?? 0) * (cageMat?.price_per_kg ?? 0) + machCosts['cage'];
+      const cageCost = ((cageW?.weight_kg ?? 0) * (cageMat?.price_per_kg ?? 0) + machCosts['cage']) * (product.cage_quantity ?? 1);
       const sealCost = sealP?.fixed_price ?? 0;
       const pilotCost = (pilotW?.weight_kg ?? 0) * (plugMat?.price_per_kg ?? 0);
       const actCost = actP?.fixed_price ?? 0;
@@ -474,6 +475,7 @@ export default function NewQuotePage() {
           seat_material_id: p.seat_material_id || null,
           stem_material_id: p.stem_material_id || null,
           cage_material_id: p.cage_material_id || null,
+          cage_quantity: p.cage_quantity ?? 1,
           seal_ring_type: p.seal_ring_type || null,
           has_pilot_plug: p.has_pilot_plug,
           has_actuator: p.has_actuator,
@@ -572,8 +574,24 @@ export default function NewQuotePage() {
       }
       return true;
     }
-    // Step 2: Terms & Pricing
+    // Step 2: Line Items & Pricing
     if (step === 2) {
+      // All products must have a calculated price
+      for (let i = 0; i < store.products.length; i++) {
+        const p = store.products[i];
+        const label = `Product ${i + 1}${p.tag_number ? ` (${p.tag_number})` : ''}`;
+        if (p.unit_price <= 0) { toast.error(`${label}: Price not calculated yet — click Recalculate`); return false; }
+        if (p.has_pricing_errors) { toast.error(`${label}: Has pricing errors — contact administrator`); return false; }
+        if (p.discount_pct < 0 || p.discount_pct > 100) { toast.error(`${label}: Discount must be between 0 and 100%`); return false; }
+      }
+      if (store.agent_commission_pct < 0 || store.agent_commission_pct > 100) {
+        toast.error('Agent commission must be between 0 and 100%');
+        return false;
+      }
+      return true;
+    }
+    // Step 3: Terms & Conditions
+    if (step === 3) {
       if (store.packing_price <= 0) { toast.error('Packing price is required and must be > 0'); return false; }
       if (!store.delivery_text.trim()) { toast.error('Delivery timeline is required (e.g. "4-6 working weeks")'); return false; }
       if (store.pricing_type === 'for-site' && store.freight_price <= 0) { toast.error('Freight price is required for F.O.R. pricing'); return false; }
@@ -637,9 +655,12 @@ export default function NewQuotePage() {
         <StepProducts series={series} materials={materials} lookupCosts={lookupCosts} customers={customers} exchangeRate={exchangeRate} bodyWeights={bodyWeights} bonnetWeights={bonnetWeights} actuatorModels={actuatorModels} handwheelPrices={handwheelPrices} calculatingId={calculatingId} testingPresets={testingPresets} tubingPresets={tubingPresets} sealRingRows={sealRingRows} machiningTypeRows={machiningTypeRows} />
       )}
       {store.currentStep === 2 && (
-        <StepTermsPricing customers={customers} />
+        <StepLineItemsPricing customers={customers} lookupCosts={lookupCosts} calculatingId={calculatingId} exchangeRate={exchangeRate} />
       )}
       {store.currentStep === 3 && (
+        <StepTermsPricing customers={customers} />
+      )}
+      {store.currentStep === 4 && (
         <StepReview customers={customers} saving={saving} onSave={handleSave} exchangeRate={exchangeRate} />
       )}
 
@@ -1220,6 +1241,19 @@ function StepProducts({
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Cage Quantity</Label>
+                      <Select value={String(product.cage_quantity ?? 1)} onValueChange={(v) => store.updateProduct(product.id, { cage_quantity: Number(v) })}>
+                        <SelectTrigger className="h-9 w-24">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">1</SelectItem>
+                          <SelectItem value="2">2</SelectItem>
+                          <SelectItem value="3">3</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </>
                 ) : (
                   <p className="text-xs text-muted-foreground italic">Not applicable for this series</p>
@@ -1590,10 +1624,206 @@ function StepProducts({
 }
 
 // ===================================================================
-// STEP 4: Review & Save
+// STEP 3: Line Items & Pricing
+// ===================================================================
+
+function StepLineItemsPricing({
+  customers,
+  lookupCosts,
+  calculatingId,
+  exchangeRate,
+}: {
+  customers: Customer[];
+  lookupCosts: (id: string) => void;
+  calculatingId: string | null;
+  exchangeRate: number;
+}) {
+  const store = useQuoteStore();
+  const customer = customers.find(c => c.id === store.customer_id);
+  const isIntl = customer?.is_international ?? false;
+  const isDealer = customer?.customer_type === 'dealer';
+
+  const fmt = (v: number) =>
+    isIntl
+      ? `$${Math.round(v / (exchangeRate || 83.5)).toLocaleString('en-US')}`
+      : `\u20b9${v.toLocaleString('en-IN')}`;
+
+  const anyUncalculated = store.products.some(p => p.unit_price <= 0);
+
+  return (
+    <div className="space-y-6">
+      {/* Agent Commission — only for dealer customers */}
+      {isDealer && (
+        <Card className="border-violet-200 bg-violet-50/40 dark:bg-violet-950/10">
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <p className="text-sm font-semibold text-violet-800 dark:text-violet-300">Agent / Dealer Commission</p>
+                <p className="text-xs text-violet-600 dark:text-violet-400 mt-0.5">
+                  Applied per-product in the pricing calculation. Auto-filled from customer profile.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                  className="h-9 w-28 text-right"
+                  value={store.agent_commission_pct || ''}
+                  onChange={e => store.setQuoteSettings({ agent_commission_pct: e.target.value === '' ? 0 : Number(e.target.value) })}
+                />
+                <span className="text-sm font-medium">%</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {anyUncalculated && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            Some products have not been priced yet. Click <strong>Recalculate</strong> on each row to generate prices.
+          </p>
+        </div>
+      )}
+
+      {/* Line Items Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Product Line Items</CardTitle>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Set per-product discounts below. Discounts are applied individually to each product line, not on the final total.
+            After changing a discount, click <strong>Recalculate</strong> to update the price.
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/30">
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground w-8">#</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground">Tag</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground">Series / Spec</th>
+                  <th className="text-center px-4 py-2.5 text-xs font-semibold text-muted-foreground w-16">Qty</th>
+                  {store.products.some(p => p.cage_material_id) && (
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-muted-foreground w-20">Cage Qty</th>
+                  )}
+                  <th className="text-center px-3 py-2.5 text-xs font-semibold text-muted-foreground w-28">Discount %</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground w-32">Unit Price</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground w-32">Line Total</th>
+                  <th className="px-3 py-2.5 w-28"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {store.products.map((p, idx) => (
+                  <tr key={p.id} className={`border-b last:border-0 ${p.has_pricing_errors ? 'bg-red-50/50 dark:bg-red-950/10' : idx % 2 === 1 ? 'bg-muted/10' : ''}`}>
+                    <td className="px-4 py-3 text-muted-foreground text-xs">{idx + 1}</td>
+                    <td className="px-4 py-3">
+                      <span className="font-mono text-xs bg-muted/50 px-1.5 py-0.5 rounded">
+                        {p.tag_number || '—'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-xs">{p.series_name || `Product #${idx + 1}`}</p>
+                      <p className="text-[11px] text-muted-foreground">{p.size} | {p.rating} | {p.end_connect_type}</p>
+                      {p.has_pricing_errors && (
+                        <p className="text-[10px] text-red-600 font-semibold mt-0.5">⚠ Pricing errors</p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center text-xs">{p.quantity}</td>
+                    {store.products.some(q => q.cage_material_id) && (
+                      <td className="px-4 py-3 text-center text-xs">
+                        {p.cage_material_id ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="font-medium">{p.cage_quantity ?? 1}</span>
+                            <span className="text-muted-foreground text-[10px]">cage{(p.cage_quantity ?? 1) > 1 ? 's' : ''}</span>
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    )}
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-1 justify-center">
+                        <Input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.5"
+                          className="h-8 w-20 text-right text-xs"
+                          value={p.discount_pct || ''}
+                          onChange={e => store.updateProduct(p.id, {
+                            discount_pct: e.target.value === '' ? 0 : Number(e.target.value),
+                            // Clear price so user knows to recalculate
+                          })}
+                        />
+                        <span className="text-xs text-muted-foreground">%</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {p.unit_price > 0 && !p.has_pricing_errors ? (
+                        <span className="font-semibold text-xs">{fmt(p.unit_price)}</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground italic">Not priced</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {p.line_total > 0 && !p.has_pricing_errors ? (
+                        <span className="font-bold text-xs">{fmt(p.line_total)}</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs gap-1 w-full"
+                        onClick={() => lookupCosts(p.id)}
+                        disabled={calculatingId === p.id || p.unit_price <= 0 && !p.series_id}
+                      >
+                        {calculatingId === p.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Calculator className="w-3 h-3" />
+                        )}
+                        {calculatingId === p.id ? '…' : 'Recalc'}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Subtotal */}
+      <div className="flex justify-end">
+        <div className="rounded-lg border bg-muted/20 px-6 py-3 space-y-1 text-sm min-w-[220px]">
+          <div className="flex justify-between gap-8">
+            <span className="text-muted-foreground">Products Subtotal</span>
+            <span className="font-bold">{fmt(store.products.reduce((s, p) => s + p.line_total, 0))}</span>
+          </div>
+          {isDealer && store.agent_commission_pct > 0 && (
+            <p className="text-[10px] text-violet-600 dark:text-violet-400">
+              Commission ({store.agent_commission_pct}%) baked into each product price
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===================================================================
+// STEP 5: Review & Save
 // ===================================================================
 
 function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Customer[]; saving: boolean; onSave: () => void; exchangeRate: number }) {
+
   const store = useQuoteStore();
   const customer = customers.find(c => c.id === store.customer_id);
   const isIntl = customer?.is_international ?? false;

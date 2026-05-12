@@ -25,6 +25,7 @@ export interface ProductConfig {
   stem_material_name: string;
   cage_material_id: string;
   cage_material_name: string;
+  cage_quantity: number; // 1, 2, or 3
   seal_ring_type: string;
   has_pilot_plug: boolean;
   has_actuator: boolean;
@@ -83,6 +84,7 @@ const emptyProduct = (): ProductConfig => ({
   stem_material_name: '',
   cage_material_id: '',
   cage_material_name: '',
+  cage_quantity: 1,
   seal_ring_type: '',
   has_pilot_plug: false,
   has_actuator: false,
@@ -282,6 +284,7 @@ export const useQuoteStore = create<QuoteState>((set) => ({
       stem_material_name: '',
       cage_material_id: p.cage_material_id ?? '',
       cage_material_name: '',
+      cage_quantity: Number(p.cage_quantity ?? 1),
       seal_ring_type: p.seal_ring_type ?? '',
       has_pilot_plug: p.has_pilot_plug ?? false,
       has_actuator: p.has_actuator ?? false,
