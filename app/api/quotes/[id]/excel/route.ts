@@ -9,268 +9,205 @@ export async function GET(
   try {
     const { id } = await params;
     const supabase = await createClient();
-
-    // Verify user access
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // Fetch quote with customer
     const { data: quote, error: quoteErr } = await supabase
-      .from('quotes')
-      .select('*, customer:customers(*)')
-      .eq('id', id)
-      .single();
+      .from('quotes').select('*, customer:customers(*)').eq('id', id).single();
+    if (quoteErr || !quote) return NextResponse.json({ error: 'Quote not found' }, { status: 404 });
 
-    if (quoteErr || !quote) {
-      return NextResponse.json({ error: 'Quote not found' }, { status: 404 });
-    }
-
-    // Fetch products with related data
     const { data: products } = await supabase
-      .from('quote_products')
-      .select('*')
-      .eq('quote_id', id)
-      .order('sort_order');
-
+      .from('quote_products').select('*').eq('quote_id', id).order('sort_order');
     const productList = products ?? [];
-
-    // Fetch tubing, testing, accessories for all products
     const productIds = productList.map(p => p.id);
 
     const [tubingRes, testingRes, accessoriesRes] = await Promise.all([
-      productIds.length > 0
-        ? supabase.from('product_tubing_items').select('*').in('quote_product_id', productIds)
-        : { data: [] },
-      productIds.length > 0
-        ? supabase.from('product_testing_items').select('*').in('quote_product_id', productIds)
-        : { data: [] },
-      productIds.length > 0
-        ? supabase.from('product_accessories').select('*').in('quote_product_id', productIds)
-        : { data: [] },
+      productIds.length > 0 ? supabase.from('product_tubing_items').select('*').in('quote_product_id', productIds) : { data: [] },
+      productIds.length > 0 ? supabase.from('product_testing_items').select('*').in('quote_product_id', productIds) : { data: [] },
+      productIds.length > 0 ? supabase.from('product_accessories').select('*').in('quote_product_id', productIds) : { data: [] },
     ]);
-
     const tubingItems = tubingRes.data ?? [];
     const testingItems = testingRes.data ?? [];
     const accessoryItems = accessoriesRes.data ?? [];
 
-    // Fetch material names, series names, actuator/handwheel names
-    const materialIds = [...new Set(productList.flatMap(p => [
-      p.body_bonnet_material_id, p.plug_material_id, p.seat_material_id,
-      p.stem_material_id, p.cage_material_id,
-    ].filter(Boolean)))];
-
+    const materialIds = [...new Set(productList.flatMap(p =>
+      [p.body_bonnet_material_id, p.plug_material_id, p.seat_material_id, p.stem_material_id, p.cage_material_id].filter(Boolean)
+    ))];
     const seriesIds = [...new Set(productList.map(p => p.series_id).filter(Boolean))];
     const actuatorIds = [...new Set(productList.map(p => p.actuator_model_id).filter(Boolean))];
     const handwheelIds = [...new Set(productList.map(p => p.handwheel_model_id).filter(Boolean))];
 
-    const [materialsRes, seriesRes, actuatorsRes, handwheelsRes] = await Promise.all([
-      materialIds.length > 0
-        ? supabase.from('materials').select('id, material_name, price_per_kg, material_group').in('id', materialIds)
-        : { data: [] },
-      seriesIds.length > 0
-        ? supabase.from('series').select('id, series_number, series_name').in('id', seriesIds)
-        : { data: [] },
-      actuatorIds.length > 0
-        ? supabase.from('actuator_models').select('id, type, model, fixed_price').in('id', actuatorIds)
-        : { data: [] },
-      handwheelIds.length > 0
-        ? supabase.from('handwheel_prices').select('id, type, model, fixed_price').in('id', handwheelIds)
-        : { data: [] },
+    const [materialsRes, seriesRes, actuatorsRes, handwheelsRes, profileRes, machiningRes,
+      bodyWRes, bonnetWRes, plugWRes, seatWRes, cageWRes, pilotWRes, sealPRes] = await Promise.all([
+      materialIds.length > 0 ? supabase.from('materials').select('id,material_name,price_per_kg,material_group').in('id', materialIds) : { data: [] },
+      seriesIds.length > 0 ? supabase.from('series').select('id,series_number,series_name').in('id', seriesIds) : { data: [] },
+      actuatorIds.length > 0 ? supabase.from('actuator_models').select('id,type,model,fixed_price').in('id', actuatorIds) : { data: [] },
+      handwheelIds.length > 0 ? supabase.from('handwheel_prices').select('id,type,model,fixed_price').in('id', handwheelIds) : { data: [] },
+      supabase.from('profiles').select('full_name,designation,phone,email').eq('id', quote.created_by).single(),
+      seriesIds.length > 0 ? supabase.from('machining_prices').select('*').in('series_id', seriesIds) : { data: [] },
+      seriesIds.length > 0 ? supabase.from('body_weights').select('*').in('series_id', seriesIds) : { data: [] },
+      seriesIds.length > 0 ? supabase.from('bonnet_weights').select('*').in('series_id', seriesIds) : { data: [] },
+      seriesIds.length > 0 ? supabase.from('plug_weights').select('*').in('series_id', seriesIds) : { data: [] },
+      seriesIds.length > 0 ? supabase.from('seat_weights').select('*').in('series_id', seriesIds) : { data: [] },
+      seriesIds.length > 0 ? supabase.from('cage_weights').select('*').in('series_id', seriesIds) : { data: [] },
+      seriesIds.length > 0 ? supabase.from('pilot_plug_weights').select('*').in('series_id', seriesIds) : { data: [] },
+      seriesIds.length > 0 ? supabase.from('seal_ring_prices').select('*').in('series_id', seriesIds) : { data: [] },
     ]);
 
-    const matMap = Object.fromEntries((materialsRes.data ?? []).map(m => [m.id, m]));
-    const seriesMap = Object.fromEntries((seriesRes.data ?? []).map(s => [s.id, s]));
-    const actMap = Object.fromEntries((actuatorsRes.data ?? []).map(a => [a.id, a]));
-    const hwMap = Object.fromEntries((handwheelsRes.data ?? []).map(h => [h.id, h]));
+    const matMap: Record<string, { material_name: string; price_per_kg: number }> = Object.fromEntries((materialsRes.data ?? []).map((m: { id: string; material_name: string; price_per_kg: number }) => [m.id, m]));
+    const seriesMap: Record<string, { series_number: string; series_name: string }> = Object.fromEntries((seriesRes.data ?? []).map((s: { id: string; series_number: string; series_name: string }) => [s.id, s]));
+    const actMap: Record<string, { type: string; model: string; fixed_price: number }> = Object.fromEntries((actuatorsRes.data ?? []).map((a: { id: string; type: string; model: string; fixed_price: number }) => [a.id, a]));
+    const hwMap: Record<string, { type: string; model: string; fixed_price: number }> = Object.fromEntries((handwheelsRes.data ?? []).map((h: { id: string; type: string; model: string; fixed_price: number }) => [h.id, h]));
+    const machiningData: { component: string; series_id: string; size: string; rating: string; type_key: string; material_id: string; fixed_price: number }[] = machiningRes.data ?? [];
+    const profile = profileRes.data;
+    const customer = quote.customer as { name: string; company?: string; country: string; is_international: boolean; address?: string };
 
-    // ── Fetch weight & machining data for detailed breakdown ──
-    // Body weights, bonnet weights, plug weights, seat weights, cage weights, pilot plug weights
-    const [bodyWRes, bonnetWRes, plugWRes, seatWRes, cageWRes, pilotWRes, stemPRes, sealPRes] = await Promise.all([
-      seriesIds.length > 0
-        ? supabase.from('body_weights').select('*').in('series_id', seriesIds)
-        : { data: [] },
-      seriesIds.length > 0
-        ? supabase.from('bonnet_weights').select('*').in('series_id', seriesIds)
-        : { data: [] },
-      seriesIds.length > 0
-        ? supabase.from('plug_weights').select('*').in('series_id', seriesIds)
-        : { data: [] },
-      seriesIds.length > 0
-        ? supabase.from('seat_weights').select('*').in('series_id', seriesIds)
-        : { data: [] },
-      seriesIds.length > 0
-        ? supabase.from('cage_weights').select('*').in('series_id', seriesIds)
-        : { data: [] },
-      seriesIds.length > 0
-        ? supabase.from('pilot_plug_weights').select('*').in('series_id', seriesIds)
-        : { data: [] },
-      seriesIds.length > 0
-        ? supabase.from('stem_fixed_prices').select('*').in('series_id', seriesIds)
-        : { data: [] },
-      seriesIds.length > 0
-        ? supabase.from('seal_ring_prices').select('*').in('series_id', seriesIds)
-        : { data: [] },
-    ]);
-
-    // Fetch machining prices
-    const machiningRes = seriesIds.length > 0
-      ? await supabase.from('machining_prices').select('*').in('series_id', seriesIds)
-      : { data: [] };
-    const machiningData = machiningRes.data ?? [];
-
-    // Helper: find weight for a given component
-    function findWeight(
-      weightData: any[],
-      seriesId: string, size: string, rating: string, extraKey?: string, extraVal?: string
-    ): number | null {
-      const match = weightData.find(w =>
-        w.series_id === seriesId && w.size === size && w.rating === rating &&
-        (extraKey ? w[extraKey] === extraVal : true)
-      );
-      return match ? Number(match.weight_kg) : null;
-    }
-
-    // Helper: find machining price for a component
-    function findMachining(
-      component: string, seriesId: string, size: string, rating: string,
-      typeKey: string, materialId: string
-    ): number {
-      const match = machiningData.find(m =>
-        m.component === component && m.series_id === seriesId &&
-        m.size === size && m.rating === rating &&
-        m.type_key === typeKey && m.material_id === materialId
-      );
-      return match ? Number(match.fixed_price) : 0;
-    }
-
-    // Helper: find stem fixed price
-    function findStemPrice(seriesId: string, size: string, rating: string, materialId: string): number {
-      const stemData = stemPRes.data ?? [];
-      const match = stemData.find((s: any) =>
-        s.series_id === seriesId && s.size === size && s.rating === rating && s.material_id === materialId
-      );
-      return match ? Number(match.fixed_price) : 0;
-    }
-
-    // Helper: find seal ring price
-    function findSealPrice(seriesId: string, sealType: string, size: string, rating: string): number {
-      const sealData = sealPRes.data ?? [];
-      const match = sealData.find((s: any) =>
-        s.series_id === seriesId && s.seal_type === sealType && s.size === size && s.rating === rating
-      );
-      return match ? Number(match.fixed_price) : 0;
-    }
-
-    const customer = quote.customer as {
-      name: string; company?: string; country: string; is_international: boolean;
+    const fw = (data: { series_id: string; size: string; rating: string; [k: string]: unknown }[], sid: string, sz: string, rt: string, ek?: string, ev?: string): number | null => {
+      const m = data.find(w => w.series_id === sid && w.size === sz && w.rating === rt && (ek ? w[ek] === ev : true));
+      return m ? Number(m.weight_kg) : null;
+    };
+    const fm = (comp: string, sid: string, sz: string, rt: string, tk: string, mid: string): number => {
+      const m = machiningData.find(x => x.component === comp && x.series_id === sid && x.size === sz && x.rating === rt && x.type_key === tk && x.material_id === mid);
+      return m ? Number(m.fixed_price) : 0;
+    };
+    const fSeal = (sid: string, stype: string, sz: string, rt: string): number => {
+      const m = (sealPRes.data ?? []).find((s: { series_id: string; seal_type: string; size: string; rating: string; fixed_price: number }) => s.series_id === sid && s.seal_type === stype && s.size === sz && s.rating === rt);
+      return m ? Number(m.fixed_price) : 0;
     };
 
-    // ============================================================
-    // Sheet 1: Configuration
-    // ============================================================
-    const configData: (string | number | null)[][] = [];
+    const applyMargin = (cost: number, pct: number) => (cost <= 0 || pct >= 100) ? cost : cost / (1 - pct / 100);
+    const r10 = (v: number) => Math.ceil(v / 10) * 10;
 
-    configData.push(['Customer Name', customer.name + (customer.company ? ` (${customer.company})` : '')]);
-    configData.push(['Enquiry Ref', quote.enquiry_id ?? '']);
-    configData.push(['Project', quote.project_name ?? '']);
-    configData.push(['Unicorn Ref', quote.quote_number]);
-    configData.push([]); // blank row 5
-    configData.push([]); // blank row 6
+    const isIntl = customer.is_international;
+    const taxRate = isIntl ? 0 : 0.18;
+    const subtotalProducts = productList.reduce((s, p) => s + Number(p.line_total_inr ?? 0), 0);
+    const freight = quote.pricing_type === 'for-site' ? Number(quote.freight_price ?? 0) : 0;
+    const packing = Number(quote.packing_price ?? 0);
+    const customCharge = quote.pricing_type === 'custom' ? Number(quote.custom_pricing_price ?? 0) : 0;
+    const taxable = subtotalProducts + freight + packing + customCharge;
+    const taxAmount = taxable * taxRate;
+    const grandTotal = taxable + taxAmount;
 
-    // Column headers (row 7)
-    const configHeaders = [
-      '', 'ITEM', 'TAG#', 'QTY', 'MODEL', 'SIZE', 'RATING', 'END CONNECTIONS',
-      'BODY MATERIAL', 'BONNET TYPE', 'TRIM TYPE', 'NO. OF CAGES', 'SEAL TYPE',
-      'SEAT MATERIAL', 'PLUG MATERIAL', 'STEM MATERIAL', 'CAGE MATERIAL',
-      'PILOT PLUG', 'ACTUATOR', 'MODEL', 'HANDWHEEL',
-      'REV', 'By', 'DATE',
+    const wb = XLSX.utils.book_new();
+
+    // ── Sheet 1: Quote Summary ──
+    const sumData: (string | number | null)[][] = [
+      ['QUOTE SUMMARY'],
+      [],
+      ['Quote Number', quote.quote_number],
+      ['Date', new Date(quote.created_at).toLocaleDateString('en-IN')],
+      ['Customer', customer.name + (customer.company ? ` (${customer.company})` : '')],
+      ['Country', customer.country],
+      ['Currency', isIntl ? 'USD ($)' : 'INR (₹)'],
+      ['Project', quote.project_name ?? ''],
+      ['Enquiry Ref', quote.enquiry_id ?? ''],
+      ['Pricing Mode', quote.pricing_mode ?? ''],
+      ['Pricing Type', quote.pricing_type ?? ''],
+      [],
+      ['COMMERCIAL TERMS'],
+      ['Validity', `${quote.validity_days} days`],
+      ['Delivery', quote.delivery_text ?? ''],
+      ['Payment – Advance', `${quote.payment_advance_pct}%`],
+      ['Payment – On Approval', `${quote.payment_approval_pct}%`],
+      ['Payment – On Despatch', `${quote.payment_despatch_pct}%`],
+      ['Warranty (Shipment)', `${quote.warranty_shipment_months} months`],
+      ['Warranty (Installation)', `${quote.warranty_installation_months} months`],
+      [],
+      ['PRICE SUMMARY'],
+      ['Products Subtotal (INR)', subtotalProducts],
+      ...(freight > 0 ? [['Freight (INR)', freight]] : []),
+      ['Packing (INR)', packing],
+      ...(quote.pricing_type === 'custom' && quote.custom_pricing_title ? [[quote.custom_pricing_title + ' (INR)', customCharge]] : []),
+      ['Taxable Amount (INR)', taxable],
+      ...(!isIntl ? [['GST 18% (INR)', taxAmount]] : []),
+      ['GRAND TOTAL (INR)', grandTotal],
+      ...(isIntl ? [['Exchange Rate', `1 USD = ₹${quote.exchange_rate_snapshot ?? 83.5}`], ['GRAND TOTAL (USD)', Math.round(grandTotal / Number(quote.exchange_rate_snapshot ?? 83.5))]] : []),
+      [],
+      ['Prepared By', profile?.full_name ?? ''],
+      ['Phone', profile?.phone ?? ''],
+      ['Email', profile?.email ?? ''],
+    ] as (string | number | null)[][];
+
+    const sumSheet = XLSX.utils.aoa_to_sheet(sumData);
+    sumSheet['!cols'] = [{ wch: 30 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, sumSheet, 'Quote Summary');
+
+    // ── Sheet 2: Configuration ──
+    const configData: (string | number | null)[][] = [
+      [`VALVE CONFIGURATION — ${quote.quote_number}`],
+      [`Customer: ${customer.name}${customer.company ? ` (${customer.company})` : ''}`],
+      [`Project: ${quote.project_name ?? ''}`],
+      [],
+      ['#', 'TAG', 'QTY', 'SERIES', 'SIZE', 'RATING', 'END CONNECTIONS', 'BODY MATERIAL',
+        'BONNET TYPE', 'TRIM TYPE', 'CAGE QTY', 'SEAL TYPE', 'SEAT MATERIAL', 'PLUG MATERIAL',
+        'STEM MATERIAL', 'CAGE MATERIAL', 'PILOT PLUG', 'ACTUATOR', 'ACTUATOR MODEL', 'HANDWHEEL',
+        'DISCOUNT %', 'COMM %'],
     ];
-    configData.push(configHeaders);
+    for (let i = 0; i < productList.length; i++) {
+      const p = productList[i];
+      const s = seriesMap[p.series_id];
+      const act = p.actuator_model_id ? actMap[p.actuator_model_id] : null;
+      const hw = p.handwheel_model_id ? hwMap[p.handwheel_model_id] : null;
+      configData.push([
+        i + 1, p.tag_number ?? '', p.quantity,
+        s ? `${s.series_number} — ${s.series_name}` : '',
+        p.size, p.rating, p.end_connect_type,
+        matMap[p.body_bonnet_material_id]?.material_name ?? 'N/A',
+        p.bonnet_type, p.trim_type ?? '',
+        p.cage_material_id ? (p.cage_quantity ?? 1) : 'N/A',
+        p.seal_ring_type ?? 'N/A',
+        matMap[p.seat_material_id]?.material_name ?? 'N/A',
+        matMap[p.plug_material_id]?.material_name ?? 'N/A',
+        matMap[p.stem_material_id]?.material_name ?? 'N/A',
+        matMap[p.cage_material_id]?.material_name ?? 'N/A',
+        p.has_pilot_plug ? 'YES' : 'NO',
+        act ? act.type : (p.has_actuator ? 'YES' : 'NO'),
+        act ? act.model : '',
+        hw ? `${hw.type} - ${hw.model}` : (p.has_handwheel ? 'YES' : 'NO'),
+        Number(p.discount_pct ?? 0),
+        Number(p.commission_pct ?? 0),
+      ]);
+    }
+    const configSheet = XLSX.utils.aoa_to_sheet(configData);
+    configSheet['!cols'] = Array(22).fill({ wch: 18 });
+    XLSX.utils.book_append_sheet(wb, configSheet, 'Configuration');
 
-    // Product rows
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name')
-      .eq('id', quote.created_by)
-      .single();
-    const creatorName = profile?.full_name ?? 'Unknown';
-
+    // ── One sheet per product ──
     for (let i = 0; i < productList.length; i++) {
       const p = productList[i];
       const s = seriesMap[p.series_id];
       const bbMat = matMap[p.body_bonnet_material_id];
-      const seatMat = matMap[p.seat_material_id];
-      const plugMat = matMap[p.plug_material_id];
-      const stemMat = matMap[p.stem_material_id];
-      const cageMat = matMap[p.cage_material_id];
-      const act = p.actuator_model_id ? actMap[p.actuator_model_id] : null;
-      const hw = p.handwheel_model_id ? hwMap[p.handwheel_model_id] : null;
-
-      configData.push([
-        '', // A
-        i + 1, // ITEM
-        p.tag_number ?? '', // TAG#
-        p.quantity, // QTY
-        s?.series_number ?? '', // MODEL
-        p.size, // SIZE
-        p.rating, // RATING
-        p.end_connect_type, // END CONNECTIONS
-        bbMat?.material_name ?? 'N/A', // BODY MATERIAL
-        p.bonnet_type, // BONNET TYPE
-        p.trim_type ?? '', // TRIM TYPE
-        p.cage_material_id ? '1 CAGE' : 'N/A', // NO. OF CAGES
-        p.seal_ring_type ?? 'N/A', // SEAL TYPE
-        seatMat?.material_name ?? 'N/A', // SEAT MATERIAL
-        plugMat?.material_name ?? 'N/A', // PLUG MATERIAL
-        stemMat?.material_name ?? 'N/A', // STEM MATERIAL
-        cageMat?.material_name ?? 'N/A', // CAGE MATERIAL
-        p.has_pilot_plug ? 'YES' : 'NO PILOT PLUG', // PILOT PLUG
-        act ? act.type : (p.has_actuator ? 'Yes' : 'No'), // ACTUATOR
-        act ? act.model : '', // MODEL
-        hw ? `${hw.type} - ${hw.model}` : (p.has_handwheel ? 'Yes' : 'No'), // HANDWHEEL
-        0, // REV
-        creatorName, // By
-        new Date(quote.created_at).getTime(), // DATE
-      ]);
-    }
-
-    const configSheet = XLSX.utils.aoa_to_sheet(configData);
-    configSheet['!cols'] = configHeaders.map((_, i) => ({ wch: i === 0 ? 3 : 18 }));
-
-    // ============================================================
-    // Sheet 2: Cost Breakdown (with detailed weight/rate/machining)
-    // ============================================================
-    const costData: (string | number | null)[][] = [];
-
-    costData.push([`COST BREAKDOWN - ${quote.quote_number}`]);
-    costData.push([`Customer: ${customer.name}${customer.company ? ` (${customer.company})` : ''}`]);
-    costData.push([]); // blank row
-
-    // Headers
-    costData.push([
-      'ITEM', 'TAG#', 'COMPONENT', 'MATERIAL', 'WEIGHT (kg)',
-      'RATE (₹/kg)', 'MATERIAL COST (₹)', 'MACHINING COST (₹)', 'TOTAL COST (₹)',
-    ]);
-
-    for (let i = 0; i < productList.length; i++) {
-      const p = productList[i];
-      const item = i + 1;
-      const tag = p.tag_number ?? '';
-      const bbMat = matMap[p.body_bonnet_material_id];
       const plugMat = matMap[p.plug_material_id];
       const seatMat = matMap[p.seat_material_id];
       const stemMat = matMap[p.stem_material_id];
       const cageMat = matMap[p.cage_material_id];
       const act = p.actuator_model_id ? actMap[p.actuator_model_id] : null;
       const hw = p.handwheel_model_id ? hwMap[p.handwheel_model_id] : null;
+      const pTubing = tubingItems.filter((t: { quote_product_id: string }) => t.quote_product_id === p.id);
+      const pTesting = testingItems.filter((t: { quote_product_id: string }) => t.quote_product_id === p.id);
+      const pAcc = accessoryItems.filter((a: { quote_product_id: string }) => a.quote_product_id === p.id);
 
-      // Get tubing/testing/accessories for this product
-      const pTubing = tubingItems.filter(t => t.quote_product_id === p.id);
-      const pTesting = testingItems.filter(t => t.quote_product_id === p.id);
-      const pAccessories = accessoryItems.filter(a => a.quote_product_id === p.id);
+      const bbRate = bbMat ? Number(bbMat.price_per_kg) : 0;
+      const cageQty = Number(p.cage_quantity ?? 1);
 
+      // Weights
+      const bodyW = fw(bodyWRes.data ?? [], p.series_id, p.size, p.rating, 'end_connect_type', p.end_connect_type);
+      const bonnetW = fw(bonnetWRes.data ?? [], p.series_id, p.size, p.rating, 'bonnet_type', p.bonnet_type);
+      const plugW = fw(plugWRes.data ?? [], p.series_id, p.size, p.rating);
+      const seatW = fw(seatWRes.data ?? [], p.series_id, p.size, p.rating);
+      const cageW = cageMat ? fw(cageWRes.data ?? [], p.series_id, p.size, p.rating) : null;
+      const pilotW = p.has_pilot_plug ? fw(pilotWRes.data ?? [], p.series_id, p.size, p.rating) : null;
+
+      // Machining
+      const bodyMach = p.body_bonnet_material_id ? fm('body', p.series_id, p.size, p.rating, p.end_connect_type, p.body_bonnet_material_id) : 0;
+      const bonnetMach = p.body_bonnet_material_id ? fm('bonnet', p.series_id, p.size, p.rating, p.bonnet_type, p.body_bonnet_material_id) : 0;
+      const plugMach = p.plug_material_id ? fm('plug', p.series_id, p.size, p.rating, p.trim_type ?? '', p.plug_material_id) : 0;
+      const seatMach = p.seat_material_id ? fm('seat', p.series_id, p.size, p.rating, p.trim_type ?? '', p.seat_material_id) : 0;
+      const stemMach = p.stem_material_id ? fm('stem', p.series_id, p.size, p.rating, p.trim_type ?? '', p.stem_material_id) : 0;
+      const cageMach = (cageMat && p.cage_material_id) ? fm('cage', p.series_id, p.size, p.rating, p.trim_type ?? '', p.cage_material_id) : 0;
+      const sealPrice = p.seal_ring_type ? fSeal(p.series_id, p.seal_ring_type, p.size, p.rating) : 0;
+
+      // Stored costs
       const bodyCost = Number(p.body_cost ?? 0);
       const bonnetCost = Number(p.bonnet_cost ?? 0);
       const plugCost = Number(p.plug_cost ?? 0);
@@ -281,188 +218,103 @@ export async function GET(
       const pilotCost = Number(p.pilot_plug_cost ?? 0);
       const actCost = Number(p.actuator_cost ?? 0);
       const hwCost = Number(p.handwheel_cost ?? 0);
-      const tubingTotal = pTubing.reduce((s, t) => s + Number(t.price), 0);
-      const testingTotal = pTesting.reduce((s, t) => s + Number(t.price), 0);
-      const accessoriesTotal = pAccessories.reduce((s, a) => s + Number(a.unit_price) * a.quantity, 0);
+      const tubingTotal = pTubing.reduce((s: number, t: { price: number | string }) => s + Number(t.price), 0);
+      const testingTotal = pTesting.reduce((s: number, t: { price: number | string }) => s + Number(t.price), 0);
+      const accTotal = pAcc.reduce((s: number, a: { unit_price: number | string; quantity: number }) => s + Number(a.unit_price) * a.quantity, 0);
 
-      // ── Look up weights and machining for each component ──
-      const bbRate = bbMat ? Number(bbMat.price_per_kg) : 0;
+      // Pricing chain
+      const mfgCost = bodyCost + bonnetCost + plugCost + seatCost + stemCost + cageCost + sealCost + pilotCost + tubingTotal + testingTotal + actCost + hwCost;
+      const mfgProfitPct = Number(p.mfg_profit_pct ?? 0);
+      const boProfitPct = Number(p.bo_profit_pct ?? 0);
+      const negMarginPct = Number(p.neg_margin_pct ?? 0);
+      const commPct = Number(p.commission_pct ?? 0);
+      const discPct = Number(p.discount_pct ?? 0);
+      const qty = Number(p.quantity ?? 1);
+      const boCost = accTotal;
+      const mfgWithProfit = applyMargin(mfgCost, mfgProfitPct);
+      const boWithProfit = boCost === 0 ? 0 : applyMargin(boCost, boProfitPct);
+      const unitCost = mfgWithProfit + boWithProfit;
+      const afterNeg = applyMargin(unitCost, negMarginPct);
+      const afterComm = commPct > 0 ? applyMargin(afterNeg, commPct) : afterNeg;
+      const afterDisc = discPct > 0 ? afterComm * (1 - discPct / 100) : afterComm;
+      const unitPrice = r10(afterDisc);
+      const lineTotal = r10(unitPrice * qty);
 
-      // Body
-      const bodyWeight = findWeight(bodyWRes.data ?? [], p.series_id, p.size, p.rating, 'end_connect_type', p.end_connect_type);
-      const bodyMachining = p.body_bonnet_material_id
-        ? findMachining('body', p.series_id, p.size, p.rating, p.end_connect_type, p.body_bonnet_material_id) : 0;
-      const bodyMatCost = bodyWeight !== null ? bodyWeight * bbRate : null;
-      costData.push([item, tag, 'Body', bbMat?.material_name ?? 'N/A',
-        bodyWeight ?? '-', bodyWeight !== null ? bbRate : '-',
-        bodyMatCost ?? '-', bodyMachining || '-', bodyCost]);
+      const INR = (v: number) => Math.round(v);
+      const sheetData: (string | number | null)[][] = [
+        [`PRODUCT ${i + 1} — COST BREAKDOWN`],
+        [`Quote: ${quote.quote_number}  |  Customer: ${customer.name}`],
+        [`Series: ${s?.series_number ?? ''} — ${s?.series_name ?? ''}  |  Tag: ${p.tag_number ?? 'N/A'}  |  Size: ${p.size}  |  Rating: ${p.rating}  |  End: ${p.end_connect_type}`],
+        [],
+        // Component table header
+        ['COMPONENT', 'MATERIAL', 'WEIGHT (kg)', 'RATE (₹/kg)', 'MATERIAL COST (₹)', 'MACHINING COST (₹)', 'COMPONENT TOTAL (₹)', 'NOTES'],
+      ];
 
-      // Bonnet
-      const bonnetWeight = findWeight(bonnetWRes.data ?? [], p.series_id, p.size, p.rating, 'bonnet_type', p.bonnet_type);
-      const bonnetMachining = p.body_bonnet_material_id
-        ? findMachining('bonnet', p.series_id, p.size, p.rating, p.bonnet_type, p.body_bonnet_material_id) : 0;
-      const bonnetMatCost = bonnetWeight !== null ? bonnetWeight * bbRate : null;
-      costData.push([item, tag, 'Bonnet', bbMat?.material_name ?? 'N/A',
-        bonnetWeight ?? '-', bonnetWeight !== null ? bbRate : '-',
-        bonnetMatCost ?? '-', bonnetMachining || '-', bonnetCost]);
+      const row = (comp: string, mat: string, wt: number | null, rate: number, matCost: number | null, mach: number, total: number, note = '') =>
+        [comp, mat, wt ?? '—', rate || '—', matCost != null ? INR(matCost) : '—', mach || '—', INR(total), note];
 
-      // Plug
-      const plugRate = plugMat ? Number(plugMat.price_per_kg) : 0;
-      const plugWeight = findWeight(plugWRes.data ?? [], p.series_id, p.size, p.rating);
-      const plugMachining = p.plug_material_id
-        ? findMachining('plug', p.series_id, p.size, p.rating, p.trim_type ?? '', p.plug_material_id) : 0;
-      const plugMatCost = plugWeight !== null ? plugWeight * plugRate : null;
-      costData.push([item, tag, 'Plug', plugMat?.material_name ?? 'N/A',
-        plugWeight ?? '-', plugWeight !== null ? plugRate : '-',
-        plugMatCost ?? '-', plugMachining || '-', plugCost]);
-
-      // Seat
-      const seatRate = seatMat ? Number(seatMat.price_per_kg) : 0;
-      const seatWeight = findWeight(seatWRes.data ?? [], p.series_id, p.size, p.rating);
-      const seatMachining = p.seat_material_id
-        ? findMachining('seat', p.series_id, p.size, p.rating, '', p.seat_material_id) : 0;
-      const seatMatCost = seatWeight !== null ? seatWeight * seatRate : null;
-      costData.push([item, tag, 'Seat', seatMat?.material_name ?? 'N/A',
-        seatWeight ?? '-', seatWeight !== null ? seatRate : '-',
-        seatMatCost ?? '-', seatMachining || '-', seatCost]);
-
-      // Stem (fixed price, no weight)
-      const stemFixedPrice = p.stem_material_id
-        ? findStemPrice(p.series_id, p.size, p.rating, p.stem_material_id) : 0;
-      const stemMachining = p.stem_material_id
-        ? findMachining('stem', p.series_id, p.size, p.rating, '', p.stem_material_id) : 0;
-      costData.push([item, tag, 'Stem', stemMat?.material_name ?? 'N/A',
-        '-', '-', stemFixedPrice || stemCost, stemMachining || '-', stemCost]);
-
-      // Cage
+      sheetData.push(row('Body', bbMat?.material_name ?? 'N/A', bodyW, bbRate, bodyW != null ? bodyW * bbRate : null, bodyMach, bodyCost));
+      sheetData.push(row('Bonnet', bbMat?.material_name ?? 'N/A', bonnetW, bbRate, bonnetW != null ? bonnetW * bbRate : null, bonnetMach, bonnetCost));
+      sheetData.push(row('Plug', plugMat?.material_name ?? 'N/A', plugW, plugMat ? Number(plugMat.price_per_kg) : 0, plugW != null ? plugW * (plugMat ? Number(plugMat.price_per_kg) : 0) : null, plugMach, plugCost));
+      sheetData.push(row('Seat', seatMat?.material_name ?? 'N/A', seatW, seatMat ? Number(seatMat.price_per_kg) : 0, seatW != null ? seatW * (seatMat ? Number(seatMat.price_per_kg) : 0) : null, seatMach, seatCost));
+      sheetData.push(row('Stem', stemMat?.material_name ?? 'N/A', null, 0, null, stemMach, stemCost, 'Weight-based + machining'));
       if (cageMat) {
         const cageRate = Number(cageMat.price_per_kg);
-        const cageWeight = findWeight(cageWRes.data ?? [], p.series_id, p.size, p.rating);
-        const cageMachining = findMachining('cage', p.series_id, p.size, p.rating, '', p.cage_material_id);
-        const cageMatCost = cageWeight !== null ? cageWeight * cageRate : null;
-        costData.push([item, tag, 'Cage', cageMat.material_name,
-          cageWeight ?? '-', cageWeight !== null ? cageRate : '-',
-          cageMatCost ?? '-', cageMachining || '-', cageCost]);
+        const cageMatCost = cageW != null ? cageW * cageRate * cageQty : null;
+        sheetData.push(row(`Cage (×${cageQty})`, cageMat.material_name, cageW != null ? cageW * cageQty : null, cageRate, cageMatCost, cageMach * cageQty, cageCost, `Qty ${cageQty} cage(s)`));
       }
-
-      // Seal Ring (fixed price)
-      if (sealCost > 0) {
-        costData.push([item, tag, 'Seal Ring', p.seal_ring_type ?? 'N/A',
-          '-', '-', sealCost, '-', sealCost]);
+      if (sealPrice > 0 || sealCost > 0) {
+        sheetData.push(['Seal Ring', p.seal_ring_type ?? 'N/A', '—', '—', INR(sealPrice || sealCost), '—', INR(sealCost), 'Fixed price']);
       }
-
-      // Pilot Plug
-      if (p.has_pilot_plug && pilotCost > 0) {
-        const ppWeight = findWeight(pilotWRes.data ?? [], p.series_id, p.size, p.rating);
+      if (p.has_pilot_plug) {
         const ppRate = plugMat ? Number(plugMat.price_per_kg) : 0;
-        const ppMatCost = ppWeight !== null ? ppWeight * ppRate : null;
-        costData.push([item, tag, 'Pilot Plug', plugMat?.material_name ?? 'N/A',
-          ppWeight ?? '-', ppWeight !== null ? ppRate : '-',
-          ppMatCost ?? '-', '-', pilotCost]);
+        sheetData.push(row('Pilot Plug', plugMat?.material_name ?? 'N/A', pilotW, ppRate, pilotW != null ? pilotW * ppRate : null, 0, pilotCost));
       }
-
-      // Actuator (bought-out, fixed price)
       if (p.has_actuator && actCost > 0) {
-        costData.push([item, tag, 'Actuator', act ? `${act.type} - ${act.model}` : 'N/A',
-          '-', '-', actCost, '-', actCost]);
+        sheetData.push(['Actuator', act ? `${act.type} — ${act.model}` : 'N/A', '—', '—', '—', '—', INR(actCost), 'Bought-out']);
       }
-
-      // Handwheel (bought-out, fixed price)
       if (p.has_handwheel && hwCost > 0) {
-        costData.push([item, tag, 'Handwheel', hw ? `${hw.type} - ${hw.model}` : 'N/A',
-          '-', '-', hwCost, '-', hwCost]);
+        sheetData.push(['Handwheel', hw ? `${hw.type} — ${hw.model}` : 'N/A', '—', '—', '—', '—', INR(hwCost), 'Bought-out']);
+      }
+      for (const t of pTesting as { item_name: string; price: number | string }[]) {
+        sheetData.push(['Testing', t.item_name, '—', '—', '—', '—', INR(Number(t.price)), 'Fixed price']);
+      }
+      for (const t of pTubing as { item_name: string; price: number | string }[]) {
+        sheetData.push(['Tubing / Fitting', t.item_name, '—', '—', '—', '—', INR(Number(t.price)), 'Fixed price']);
+      }
+      for (const a of pAcc as { item_name: string; unit_price: number | string; quantity: number }[]) {
+        sheetData.push([`Accessory — ${a.item_name}`, `×${a.quantity}`, '—', '—', INR(Number(a.unit_price)), '—', INR(Number(a.unit_price) * a.quantity), 'Bought-out']);
       }
 
-      // Testing items
-      for (const t of pTesting) {
-        costData.push([item, tag, 'Testing', t.item_name, '-', '-', Number(t.price), '-', Number(t.price)]);
+      sheetData.push([]);
+      sheetData.push(['PRICING CHAIN', '', '', '', '', '', '(₹)']);
+      sheetData.push(['Manufacturing Cost (body+bonnet+plug+seat+stem+cage+seal+pilot+testing+tubing+act+hw)', '', '', '', '', '', INR(mfgCost)]);
+      sheetData.push([`Mfg Profit (${mfgProfitPct}% margin-on-price)`, '', '', '', '', '', INR(mfgWithProfit - mfgCost)]);
+      sheetData.push(['Mfg Cost After Profit', '', '', '', '', '', INR(mfgWithProfit)]);
+      sheetData.push(['Bought-out Cost (accessories)', '', '', '', '', '', INR(boCost)]);
+      sheetData.push([`BO Profit (${boProfitPct}% margin-on-price)`, '', '', '', '', '', INR(boWithProfit - boCost)]);
+      sheetData.push(['Unit Cost (Mfg + BO)', '', '', '', '', '', INR(unitCost)]);
+      sheetData.push([`Negotiation Margin (${negMarginPct}%)`, '', '', '', '', '', INR(afterNeg - unitCost)]);
+      sheetData.push(['After Negotiation Margin', '', '', '', '', '', INR(afterNeg)]);
+      if (commPct > 0) {
+        sheetData.push([`Agent Commission (${commPct}%)`, '', '', '', '', '', INR(afterComm - afterNeg)]);
+        sheetData.push(['After Commission', '', '', '', '', '', INR(afterComm)]);
       }
-
-      // Tubing items
-      for (const t of pTubing) {
-        costData.push([item, tag, 'Tubing/Fitting', t.item_name, '-', '-', Number(t.price), '-', Number(t.price)]);
+      if (discPct > 0) {
+        sheetData.push([`Discount (${discPct}%)`, '', '', '', '', '', INR(afterDisc - afterComm)]);
+        sheetData.push(['After Discount', '', '', '', '', '', INR(afterDisc)]);
       }
+      sheetData.push([`⭐ UNIT PRICE (rounded to ₹10)`, '', '', '', '', '', unitPrice]);
+      sheetData.push([`LINE TOTAL (×${qty} qty, rounded to ₹10)`, '', '', '', '', '', lineTotal]);
 
-      // Accessories
-      for (const a of pAccessories) {
-        const lineAmt = Number(a.unit_price) * a.quantity;
-        costData.push([item, tag, 'Accessory', `${a.item_name} x${a.quantity}`, '-', '-', lineAmt, '-', lineAmt]);
-      }
-
-      costData.push([]); // blank row
-
-      // Subtotals
-      const bodySubAssembly = bodyCost + bonnetCost + plugCost + seatCost + stemCost + cageCost + sealCost + pilotCost;
-
-      costData.push([item, tag, 'SUBTOTALS', '', '', '', '', '', '']);
-      costData.push(['', '', 'Body Sub-Assembly Total', '', '', '', '', '', bodySubAssembly]);
-      costData.push(['', '', 'Actuator Sub-Assembly Total', '', '', '', '', '', actCost + hwCost]);
-      costData.push(['', '', 'Testing Total', '', '', '', '', '', testingTotal]);
-      costData.push(['', '', 'Tubing & Fitting Total', '', '', '', '', '', tubingTotal]);
-      costData.push(['', '', 'Accessories Total', '', '', '', '', '', accessoriesTotal]);
-      costData.push([]); // blank
-
-      // Pricing Breakdown
-      const mfgTotal = Number(p.mfg_total_cost ?? 0);
-      const boTotal = Number(p.bo_total_cost ?? 0);
-      const mfgProfitPct = Number(p.mfg_profit_pct);
-      const boProfitPct = Number(p.bo_profit_pct);
-      const negMarginPct = Number(p.neg_margin_pct);
-      const unitPrice = Number(p.unit_price_inr ?? 0);
-      const lineTotal = Number(p.line_total_inr ?? 0);
-
-      // Recalculate pricing steps for display
-      const mfgCostWithProfit = mfgProfitPct >= 100 ? mfgTotal : mfgTotal / (1 - mfgProfitPct / 100);
-      const boCostWithProfit = boTotal === 0 ? 0 : (boProfitPct >= 100 ? boTotal : boTotal / (1 - boProfitPct / 100));
-      const unitCost = mfgCostWithProfit + boCostWithProfit;
-      const afterNegMargin = negMarginPct >= 100 ? unitCost : unitCost / (1 - negMarginPct / 100);
-
-      costData.push([item, tag, '=== PRICING BREAKDOWN ===', '', '', '', '', '', '']);
-      costData.push(['', '', '1. BASE COSTS (Before Profits)', '', '', '', '', '', '']);
-      costData.push(['', '', '   Manufacturing Items (Body+Testing)', '', '', '', '', '', mfgTotal]);
-      costData.push(['', '', '   Bought-out Items (Actuator+Tubing+Acc)', '', '', '', '', '', boTotal]);
-      costData.push(['', '', '   TOTAL BASE COST', '', '', '', '', '', mfgTotal + boTotal]);
-      costData.push([]); // blank
-
-      costData.push(['', '', '2. AFTER MANUFACTURING PROFIT', '', '', '', '', '', '']);
-      costData.push(['', '', `   Manufacturing Profit (${mfgProfitPct}% on ₹${mfgTotal.toLocaleString('en-IN')})`, '', '', '', '', '', `+ ₹${(mfgCostWithProfit - mfgTotal).toLocaleString('en-IN', { maximumFractionDigits: 3 })}`]);
-      costData.push(['', '', '   Cost After Mfg Profit', '', '', '', '', '', mfgCostWithProfit]);
-      costData.push([]); // blank
-
-      costData.push(['', '', '3. AFTER BOUGHT-OUT PROFIT', '', '', '', '', '', '']);
-      costData.push(['', '', `   Bought-out Profit (${boProfitPct}% on ₹${boTotal.toLocaleString('en-IN')})`, '', '', '', '', '', `+ ₹${(boCostWithProfit - boTotal).toLocaleString('en-IN', { maximumFractionDigits: 3 })}`]);
-      costData.push(['', '', '   Cost After All Profits', '', '', '', '', '', unitCost]);
-      costData.push([]); // blank
-
-      costData.push(['', '', '4. AFTER NEGOTIATION MARGIN', '', '', '', '', '', '']);
-      costData.push(['', '', `   Negotiation Margin (${negMarginPct}%)`, '', '', '', '', '', `+ ₹${(afterNegMargin - unitCost).toLocaleString('en-IN', { maximumFractionDigits: 3 })}`]);
-      costData.push(['', '', '   ⭐ FINAL UNIT COST', '', '', '', '', '', unitPrice]);
-      costData.push([]); // blank
-      costData.push(['', '', `5. LINE TOTAL (Unit Cost × ${p.quantity} qty)`, '', '', '', '', '', lineTotal]);
-
-      costData.push([]); // blank separator between products
+      const prodSheet = XLSX.utils.aoa_to_sheet(sheetData);
+      prodSheet['!cols'] = [{ wch: 55 }, { wch: 22 }, { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 25 }];
+      const sheetName = `P${i + 1}${p.tag_number ? '-' + String(p.tag_number).slice(0, 10) : ''}`;
+      XLSX.utils.book_append_sheet(wb, prodSheet, sheetName);
     }
 
-    // Grand Total
-    const grandTotal = productList.reduce((s, p) => s + Number(p.line_total_inr ?? 0), 0);
-    costData.push([]); // blank
-    costData.push(['', '', '🏆 GRAND TOTAL (All Products)', '', '', '', '', '', grandTotal]);
-
-    const costSheet = XLSX.utils.aoa_to_sheet(costData);
-    costSheet['!cols'] = [
-      { wch: 6 }, { wch: 8 }, { wch: 42 }, { wch: 22 },
-      { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
-    ];
-
-    // Build workbook
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, configSheet, 'Configuration');
-    XLSX.utils.book_append_sheet(wb, costSheet, 'Cost Breakdown');
-
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-
     const filename = quote.quote_number.replace(/\//g, '-');
-
     return new NextResponse(buffer, {
       status: 200,
       headers: {
