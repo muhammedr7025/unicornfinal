@@ -204,11 +204,9 @@ export default function NewQuotePage() {
 
       const { data: actP } = product.actuator_model_id ? await supabase.from('actuator_models')
         .select('fixed_price').eq('id', product.actuator_model_id).limit(1).single() : { data: null };
-      if (product.actuator_model_id && !actP) warnings.push(`⚠ Actuator price not found`);
 
       const { data: hwP } = product.handwheel_model_id ? await supabase.from('handwheel_prices')
         .select('fixed_price').eq('id', product.handwheel_model_id).limit(1).single() : { data: null };
-      if (product.handwheel_model_id && !hwP) warnings.push(`⚠ Handwheel price not found`);
 
       // ---- Material lookups ----
       const bbMat = (materials['BodyBonnet'] ?? []).find(m => m.id === product.body_bonnet_material_id);
@@ -334,6 +332,10 @@ export default function NewQuotePage() {
       if (product.cage_material_id && machCosts['cage'] === 0) criticalMissing.push('Cage machining cost missing — contact administrator');
       // Seal Ring
       if (product.seal_ring_type && !sealP) criticalMissing.push(`Seal Ring price not found (${product.seal_ring_type}) — contact administrator`);
+      // Actuator
+      if (product.actuator_model_id && !actP) criticalMissing.push('Actuator price not found — contact administrator');
+      // Handwheel
+      if (product.handwheel_model_id && !hwP) criticalMissing.push('Handwheel price not found — contact administrator');
 
 
       const hasCritical = criticalMissing.length > 0;
@@ -621,6 +623,11 @@ export default function NewQuotePage() {
           <h1 className="text-2xl font-bold tracking-tight">{store.edit_mode ? 'Edit Quote' : 'Create New Quote'}</h1>
           <p className="text-muted-foreground text-sm mt-1">Step {store.currentStep + 1} of {STEPS.length}{store.edit_mode && ` • Editing ${store.custom_quote_number}`}</p>
         </div>
+        {exchangeRate > 0 && (
+          <Badge variant="outline" className="text-xs font-mono gap-1">
+            💱 1 USD = ₹{exchangeRate.toLocaleString('en-IN')}
+          </Badge>
+        )}
       </div>
 
       {/* Step indicator */}
@@ -669,7 +676,7 @@ export default function NewQuotePage() {
         <StepLineItemsPricing customers={customers} lookupCosts={lookupCosts} calculatingId={calculatingId} exchangeRate={exchangeRate} />
       )}
       {store.currentStep === 3 && (
-        <StepTermsPricing customers={customers} />
+        <StepTermsPricing customers={customers} exchangeRate={exchangeRate} />
       )}
       {store.currentStep === 4 && (
         <StepReview customers={customers} saving={saving} onSave={handleSave} exchangeRate={exchangeRate} />
@@ -785,10 +792,11 @@ function StepCustomerProject({ customers }: { customers: Customer[] }) {
 // STEP 3: Terms & Pricing
 // ===================================================================
 
-function StepTermsPricing({ customers }: { customers: Customer[] }) {
+function StepTermsPricing({ customers, exchangeRate }: { customers: Customer[]; exchangeRate: number }) {
   const store = useQuoteStore();
   const selectedCustomer = customers.find(c => c.id === store.customer_id);
   const isDealer = selectedCustomer?.customer_type === 'dealer';
+  const isIntl = selectedCustomer?.is_international ?? false;
   const paymentTotal = store.payment_advance_pct + store.payment_approval_pct + store.payment_despatch_pct;
 
   return (
@@ -844,8 +852,24 @@ function StepTermsPricing({ customers }: { customers: Customer[] }) {
                 </div>
               )}
               <div className="space-y-2">
-                <Label>Packing Charges (₹) *</Label>
-                <Input type="number" min="0" value={store.packing_price || ''} onChange={(e) => store.setQuoteSettings({ packing_price: e.target.value === '' ? 0 : Number(e.target.value) })} />
+                <Label>{isIntl ? `Packing Charges (USD $) *` : 'Packing Charges (₹) *'}</Label>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{isIntl ? '$' : '₹'}</span>
+                  <Input
+                    type="number" min="0"
+                    className="pl-6"
+                    value={isIntl
+                      ? (store.packing_price > 0 ? Math.round(store.packing_price / (exchangeRate || 83.5)) : '')
+                      : (store.packing_price || '')}
+                    onChange={(e) => {
+                      const raw = e.target.value === '' ? 0 : Number(e.target.value);
+                      store.setQuoteSettings({ packing_price: isIntl ? Math.round(raw * (exchangeRate || 83.5)) : raw });
+                    }}
+                  />
+                </div>
+                {isIntl && store.packing_price > 0 && (
+                  <p className="text-[10px] text-muted-foreground">= ₹{store.packing_price.toLocaleString('en-IN')} INR</p>
+                )}
               </div>
             </div>
           </CardContent>
@@ -1311,10 +1335,13 @@ function StepProducts({
                 {product.has_pilot_plug ? (
                   <div className="space-y-2">
                     <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-300">✓ Pilot Plug included</Badge>
-                    <p className="text-xs text-muted-foreground">
-                     Material: <strong>{product.plug_material_id ? getMatName('Plug', product.plug_material_id) : '⚠ Select Plug Material first'}</strong>
-                    </p>
-                    <p className="text-xs text-muted-foreground italic">Cost = Pilot Plug Weight × Plug Material Rate</p>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Pilot Plug Material</Label>
+                      <p className="text-xs font-semibold text-foreground">
+                        {product.plug_material_id ? getMatName('Plug', product.plug_material_id) : <span className="text-amber-600">⚠ Select Plug Material above first</span>}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground italic">Uses same material as Plug. Cost = Pilot Plug Weight × Plug Material Rate</p>
+                    </div>
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground italic">Check above to include (cost = weight × plug material rate)</p>
@@ -1327,119 +1354,6 @@ function StepProducts({
             <p className="text-sm text-muted-foreground">🔧 Select Series, Size, and Rating above to configure Body Sub-Assembly</p>
           </div>
           )}
-
-          {/* ── Tubing & Fitting (Manufacturing Cost) ── */}
-          <div className="rounded-xl border-2 border-cyan-200 bg-cyan-50/30 dark:bg-cyan-950/10 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-cyan-800 dark:text-cyan-400 flex items-center gap-2">
-                🔩 Tubing & Fitting
-              </h3>
-              <div className="flex items-center gap-1.5">
-                {(() => { const mt = tubingPresets.filter(tp => tp.series_id === product.series_id && tp.size === product.size && tp.rating === product.rating); return mt.length > 0 ? (
-                  <Button size="sm" variant="secondary" className="h-7 text-xs gap-1" onClick={() => {
-                    const presetItems = mt.map(tp => ({ item_name: tp.item_name, price: Number(tp.price), is_preset: true }));
-                    store.updateProduct(product.id, { tubing_items: [...product.tubing_items, ...presetItems] });
-                  }}>📋 Load Presets ({mt.length})</Button>
-                ) : null; })()}
-                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => {
-                  store.updateProduct(product.id, { tubing_items: [...product.tubing_items, { item_name: '', price: 0, is_preset: false }] });
-                }}>
-                  <Plus className="w-3 h-3" /> Add
-                </Button>
-              </div>
-            </div>
-            {product.tubing_items.length === 0 && <p className="text-xs text-muted-foreground italic">No tubing items added.</p>}
-            {product.tubing_items.map((item, ti) => (
-              <div key={ti} className="flex items-center gap-2">
-                <Input className="h-8 text-xs flex-1" placeholder="Item name" value={item.item_name} onChange={(e) => {
-                  const items = [...product.tubing_items]; items[ti] = { ...items[ti], item_name: e.target.value }; store.updateProduct(product.id, { tubing_items: items });
-                }} />
-                <Input className="h-8 text-xs w-28" type="number" min="0" placeholder="Price" value={item.price || ''} onChange={(e) => {
-                  const items = [...product.tubing_items]; items[ti] = { ...items[ti], price: e.target.value === '' ? 0 : Number(e.target.value) }; store.updateProduct(product.id, { tubing_items: items });
-                }} />
-                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={() => {
-                  const items = product.tubing_items.filter((_, j) => j !== ti); store.updateProduct(product.id, { tubing_items: items });
-                }}><Trash2 className="w-3 h-3" /></Button>
-              </div>
-            ))}
-            {product.tubing_items.length > 0 && (
-              <p className="text-xs text-right text-muted-foreground">Tubing Total: ₹{product.tubing_items.reduce((s, t) => s + t.price, 0).toLocaleString('en-IN')}</p>
-            )}
-          </div>
-
-          {/* ── Testing (Manufacturing Cost) ── */}
-          <div className="rounded-xl border-2 border-teal-200 bg-teal-50/30 dark:bg-teal-950/10 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-teal-800 dark:text-teal-400 flex items-center gap-2">
-                🧪 Testing
-              </h3>
-              <div className="flex items-center gap-1.5">
-                {(() => { const mt = testingPresets.filter(tp => tp.series_id === product.series_id && tp.size === product.size && tp.rating === product.rating); return mt.length > 0 ? (
-                  <Button size="sm" variant="secondary" className="h-7 text-xs gap-1" onClick={() => {
-                    const presetItems = mt.map(tp => ({ item_name: tp.test_name, price: Number(tp.price), is_preset: true }));
-                    store.updateProduct(product.id, { testing_items: [...product.testing_items, ...presetItems] });
-                  }}>📋 Load Presets ({mt.length})</Button>
-                ) : null; })()}
-                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => {
-                  store.updateProduct(product.id, { testing_items: [...product.testing_items, { item_name: '', price: 0, is_preset: false }] });
-                }}>
-                  <Plus className="w-3 h-3" /> Add
-                </Button>
-              </div>
-            </div>
-            {product.testing_items.length === 0 && <p className="text-xs text-muted-foreground italic">No testing items added.</p>}
-            {product.testing_items.map((item, ti) => (
-              <div key={ti} className="flex items-center gap-2">
-                <Input className="h-8 text-xs flex-1" placeholder="Test name" value={item.item_name} onChange={(e) => {
-                  const items = [...product.testing_items]; items[ti] = { ...items[ti], item_name: e.target.value }; store.updateProduct(product.id, { testing_items: items });
-                }} />
-                <Input className="h-8 text-xs w-28" type="number" min="0" placeholder="Price" value={item.price || ''} onChange={(e) => {
-                  const items = [...product.testing_items]; items[ti] = { ...items[ti], price: e.target.value === '' ? 0 : Number(e.target.value) }; store.updateProduct(product.id, { testing_items: items });
-                }} />
-                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={() => {
-                  const items = product.testing_items.filter((_, j) => j !== ti); store.updateProduct(product.id, { testing_items: items });
-                }}><Trash2 className="w-3 h-3" /></Button>
-              </div>
-            ))}
-            {product.testing_items.length > 0 && (
-              <p className="text-xs text-right text-muted-foreground">Testing Total: ₹{product.testing_items.reduce((s, t) => s + t.price, 0).toLocaleString('en-IN')}</p>
-            )}
-          </div>
-
-          {/* ── Accessories (Bought-out Cost) ── */}
-          <div className="rounded-xl border-2 border-orange-200 bg-orange-50/30 dark:bg-orange-950/10 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-orange-800 dark:text-orange-400 flex items-center gap-2">
-                🧰 Accessories (Bought-out)
-              </h3>
-              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => {
-                store.updateProduct(product.id, { accessories: [...product.accessories, { item_name: '', unit_price: 0, quantity: 1 }] });
-              }}>
-                <Plus className="w-3 h-3" /> Add Item
-              </Button>
-            </div>
-            {product.accessories.length === 0 && <p className="text-xs text-muted-foreground italic">No accessories. Click "Add Item" to add.</p>}
-            {product.accessories.map((item, ai) => (
-              <div key={ai} className="flex items-center gap-2">
-                <Input className="h-8 text-xs flex-1" placeholder="Item name" value={item.item_name} onChange={(e) => {
-                  const items = [...product.accessories]; items[ai] = { ...items[ai], item_name: e.target.value }; store.updateProduct(product.id, { accessories: items });
-                }} />
-                <Input className="h-8 text-xs w-24" type="number" min="0" placeholder="Price" value={item.unit_price || ''} onChange={(e) => {
-                  const items = [...product.accessories]; items[ai] = { ...items[ai], unit_price: e.target.value === '' ? 0 : Number(e.target.value) }; store.updateProduct(product.id, { accessories: items });
-                }} />
-                <Input className="h-8 text-xs w-16" type="number" min="1" placeholder="Qty" value={item.quantity || ''} onChange={(e) => {
-                  const items = [...product.accessories]; items[ai] = { ...items[ai], quantity: e.target.value === '' ? 1 : Number(e.target.value) }; store.updateProduct(product.id, { accessories: items });
-                }} />
-                <span className="text-xs text-muted-foreground w-20 text-right">₹{(item.unit_price * item.quantity).toLocaleString('en-IN')}</span>
-                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={() => {
-                  const items = product.accessories.filter((_, j) => j !== ai); store.updateProduct(product.id, { accessories: items });
-                }}><Trash2 className="w-3 h-3" /></Button>
-              </div>
-            ))}
-            {product.accessories.length > 0 && (
-              <p className="text-xs text-right text-muted-foreground">Accessories Total: ₹{product.accessories.reduce((s, a) => s + a.unit_price * a.quantity, 0).toLocaleString('en-IN')}</p>
-            )}
-          </div>
 
           {/* ── Actuator Sub-Assembly ── */}
           <div className="rounded-xl border-2 border-blue-200 bg-blue-50/30 dark:bg-blue-950/10 p-4 space-y-4">
@@ -1576,6 +1490,120 @@ function StepProducts({
               );
             })()}
           </div>
+
+          {/* ── Tubing & Fitting (Manufacturing Cost) ── */}
+          <div className="rounded-xl border-2 border-cyan-200 bg-cyan-50/30 dark:bg-cyan-950/10 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-cyan-800 dark:text-cyan-400 flex items-center gap-2">
+                🔩 Tubing & Fitting
+              </h3>
+              <div className="flex items-center gap-1.5">
+                {(() => { const mt = tubingPresets.filter(tp => tp.series_id === product.series_id && tp.size === product.size && tp.rating === product.rating); return mt.length > 0 ? (
+                  <Button size="sm" variant="secondary" className="h-7 text-xs gap-1" onClick={() => {
+                    const presetItems = mt.map(tp => ({ item_name: tp.item_name, price: Number(tp.price), is_preset: true }));
+                    store.updateProduct(product.id, { tubing_items: [...product.tubing_items, ...presetItems] });
+                  }}>📋 Load Presets ({mt.length})</Button>
+                ) : null; })()}
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => {
+                  store.updateProduct(product.id, { tubing_items: [...product.tubing_items, { item_name: '', price: 0, is_preset: false }] });
+                }}>
+                  <Plus className="w-3 h-3" /> Add
+                </Button>
+              </div>
+            </div>
+            {product.tubing_items.length === 0 && <p className="text-xs text-muted-foreground italic">No tubing items added.</p>}
+            {product.tubing_items.map((item, ti) => (
+              <div key={ti} className="flex items-center gap-2">
+                <Input className="h-8 text-xs flex-1" placeholder="Item name" value={item.item_name} onChange={(e) => {
+                  const items = [...product.tubing_items]; items[ti] = { ...items[ti], item_name: e.target.value }; store.updateProduct(product.id, { tubing_items: items });
+                }} />
+                <Input className="h-8 text-xs w-28" type="number" min="0" placeholder="Price" value={item.price || ''} onChange={(e) => {
+                  const items = [...product.tubing_items]; items[ti] = { ...items[ti], price: e.target.value === '' ? 0 : Number(e.target.value) }; store.updateProduct(product.id, { tubing_items: items });
+                }} />
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={() => {
+                  const items = product.tubing_items.filter((_, j) => j !== ti); store.updateProduct(product.id, { tubing_items: items });
+                }}><Trash2 className="w-3 h-3" /></Button>
+              </div>
+            ))}
+            {product.tubing_items.length > 0 && (
+              <p className="text-xs text-right text-muted-foreground">Tubing Total: ₹{product.tubing_items.reduce((s, t) => s + t.price, 0).toLocaleString('en-IN')}</p>
+            )}
+          </div>
+
+          {/* ── Testing (Manufacturing Cost) ── */}
+          <div className="rounded-xl border-2 border-teal-200 bg-teal-50/30 dark:bg-teal-950/10 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-teal-800 dark:text-teal-400 flex items-center gap-2">
+                🧪 Testing
+              </h3>
+              <div className="flex items-center gap-1.5">
+                {(() => { const mt = testingPresets.filter(tp => tp.series_id === product.series_id && tp.size === product.size && tp.rating === product.rating); return mt.length > 0 ? (
+                  <Button size="sm" variant="secondary" className="h-7 text-xs gap-1" onClick={() => {
+                    const presetItems = mt.map(tp => ({ item_name: tp.test_name, price: Number(tp.price), is_preset: true }));
+                    store.updateProduct(product.id, { testing_items: [...product.testing_items, ...presetItems] });
+                  }}>📋 Load Presets ({mt.length})</Button>
+                ) : null; })()}
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => {
+                  store.updateProduct(product.id, { testing_items: [...product.testing_items, { item_name: '', price: 0, is_preset: false }] });
+                }}>
+                  <Plus className="w-3 h-3" /> Add
+                </Button>
+              </div>
+            </div>
+            {product.testing_items.length === 0 && <p className="text-xs text-muted-foreground italic">No testing items added.</p>}
+            {product.testing_items.map((item, ti) => (
+              <div key={ti} className="flex items-center gap-2">
+                <Input className="h-8 text-xs flex-1" placeholder="Test name" value={item.item_name} onChange={(e) => {
+                  const items = [...product.testing_items]; items[ti] = { ...items[ti], item_name: e.target.value }; store.updateProduct(product.id, { testing_items: items });
+                }} />
+                <Input className="h-8 text-xs w-28" type="number" min="0" placeholder="Price" value={item.price || ''} onChange={(e) => {
+                  const items = [...product.testing_items]; items[ti] = { ...items[ti], price: e.target.value === '' ? 0 : Number(e.target.value) }; store.updateProduct(product.id, { testing_items: items });
+                }} />
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={() => {
+                  const items = product.testing_items.filter((_, j) => j !== ti); store.updateProduct(product.id, { testing_items: items });
+                }}><Trash2 className="w-3 h-3" /></Button>
+              </div>
+            ))}
+            {product.testing_items.length > 0 && (
+              <p className="text-xs text-right text-muted-foreground">Testing Total: ₹{product.testing_items.reduce((s, t) => s + t.price, 0).toLocaleString('en-IN')}</p>
+            )}
+          </div>
+
+          {/* ── Accessories (Bought-out Cost) ── */}
+          <div className="rounded-xl border-2 border-orange-200 bg-orange-50/30 dark:bg-orange-950/10 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-orange-800 dark:text-orange-400 flex items-center gap-2">
+                🧰 Accessories (Bought-out)
+              </h3>
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => {
+                store.updateProduct(product.id, { accessories: [...product.accessories, { item_name: '', unit_price: 0, quantity: 1 }] });
+              }}>
+                <Plus className="w-3 h-3" /> Add Item
+              </Button>
+            </div>
+            {product.accessories.length === 0 && <p className="text-xs text-muted-foreground italic">No accessories. Click "Add Item" to add.</p>}
+            {product.accessories.map((item, ai) => (
+              <div key={ai} className="flex items-center gap-2">
+                <Input className="h-8 text-xs flex-1" placeholder="Item name" value={item.item_name} onChange={(e) => {
+                  const items = [...product.accessories]; items[ai] = { ...items[ai], item_name: e.target.value }; store.updateProduct(product.id, { accessories: items });
+                }} />
+                <Input className="h-8 text-xs w-24" type="number" min="0" placeholder="Price" value={item.unit_price || ''} onChange={(e) => {
+                  const items = [...product.accessories]; items[ai] = { ...items[ai], unit_price: e.target.value === '' ? 0 : Number(e.target.value) }; store.updateProduct(product.id, { accessories: items });
+                }} />
+                <Input className="h-8 text-xs w-16" type="number" min="1" placeholder="Qty" value={item.quantity || ''} onChange={(e) => {
+                  const items = [...product.accessories]; items[ai] = { ...items[ai], quantity: e.target.value === '' ? 1 : Number(e.target.value) }; store.updateProduct(product.id, { accessories: items });
+                }} />
+                <span className="text-xs text-muted-foreground w-20 text-right">₹{(item.unit_price * item.quantity).toLocaleString('en-IN')}</span>
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={() => {
+                  const items = product.accessories.filter((_, j) => j !== ai); store.updateProduct(product.id, { accessories: items });
+                }}><Trash2 className="w-3 h-3" /></Button>
+              </div>
+            ))}
+            {product.accessories.length > 0 && (
+              <p className="text-xs text-right text-muted-foreground">Accessories Total: ₹{product.accessories.reduce((s, a) => s + a.unit_price * a.quantity, 0).toLocaleString('en-IN')}</p>
+            )}
+          </div>
+
 
           {/* ── Discount + Calculate ── */}
           <Card>
@@ -1748,12 +1776,29 @@ function StepLineItemsPricing({
             <div>
               <CardTitle className="text-base">Product Line Items</CardTitle>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Set per-product discounts below. Discounts are applied individually to each product line, not on the final total.
-                After changing a discount, click <strong>Recalculate</strong> to update the price.
+                Set per-product discounts below. Discounts are applied individually to each product line.
+                After changing discounts, click <strong>Recalculate All</strong> to update all prices at once.
               </p>
             </div>
-            {/* Bulk discount apply-to-all */}
-            <BulkDiscountBar />
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Bulk discount apply-to-all */}
+              <BulkDiscountBar />
+              {/* Single Recalculate All button */}
+              <Button
+                size="sm"
+                variant="default"
+                className="gap-1.5 h-8 text-xs"
+                disabled={calculatingId !== null}
+                onClick={async () => {
+                  for (const p of store.products) {
+                    await lookupCosts(p.id);
+                  }
+                }}
+              >
+                {calculatingId !== null ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Calculator className="w-3.5 h-3.5" />}
+                {calculatingId !== null ? 'Calculating…' : 'Recalculate All'}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -1834,21 +1879,8 @@ function StepLineItemsPricing({
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-3 py-3">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs gap-1 w-full"
-                        onClick={() => lookupCosts(p.id)}
-                        disabled={calculatingId === p.id || p.unit_price <= 0 && !p.series_id}
-                      >
-                        {calculatingId === p.id ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Calculator className="w-3 h-3" />
-                        )}
-                        {calculatingId === p.id ? '…' : 'Recalc'}
-                      </Button>
+                    <td className="px-3 py-3 text-xs text-muted-foreground text-center">
+                      {p.has_pricing_errors && <span title="Pricing errors">⚠</span>}
                     </td>
                   </tr>
                 ))}
