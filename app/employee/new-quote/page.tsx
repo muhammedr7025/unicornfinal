@@ -150,6 +150,14 @@ export default function NewQuotePage() {
       toast.error('Please select all required materials (Body/Bonnet, Plug, Seat, Stem)');
       return;
     }
+    if (product.has_actuator && !product.actuator_model_id) {
+      toast.error('Actuator is selected but model is not fully configured. Please complete Type → Series → Model → Standard/Special selection or uncheck Actuator.');
+      return;
+    }
+    if (product.has_handwheel && !product.handwheel_model_id) {
+      toast.error('Handwheel is selected but model is not fully configured. Please complete Type → Series → Model → Standard/Special selection or uncheck Handwheel.');
+      return;
+    }
 
     setCalculatingId(productId);
     try {
