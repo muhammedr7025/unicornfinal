@@ -194,7 +194,19 @@ export default function MachinePricingPage() {
     return true;
   });
 
+  // Helper to get display text from IDs
+  const getSeriesDisplay = (id: string) => {
+    const s = series.find(s => s.id === id);
+    return s ? `${s.series_number} — ${s.series_name}` : 'Select';
+  };
+
+  const getMaterialDisplay = (id: string) => {
+    const m = materials.find(m => m.id === id);
+    return m ? `${m.material_name} (${m.material_group})` : 'Select';
+  };
+
   if (loading) return <div className="flex items-center justify-center py-24"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>;
+
 
   return (
     <div className="space-y-6">
@@ -300,61 +312,68 @@ export default function MachinePricingPage() {
 
       {/* Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className="w-full max-w-sm sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{editing ? 'Edit' : 'Add'} Machining Price</DialogTitle>
+            <DialogTitle className="text-lg sm:text-xl">{editing ? 'Edit' : 'Add'} Machining Price</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 pt-2">
-            <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-3 pt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label className="text-xs">Component *</Label>
+                <Label className="text-xs font-medium">Component *</Label>
                 <Select value={form.component} onValueChange={v => setForm(f => ({ ...f, component: v ?? 'body' }))}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {COMPONENTS.map(c => <SelectItem key={c} value={c} className="capitalize">{c}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Series *</Label>
+                <Label className="text-xs font-medium">Series *</Label>
                 <Select value={form.series_id} onValueChange={v => setForm(f => ({ ...f, series_id: v ?? '' }))}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Select" /></SelectTrigger>
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue>{form.series_id ? getSeriesDisplay(form.series_id) : 'Select'}</SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
                     {series.map(s => <SelectItem key={s.id} value={s.id}>{s.series_number} — {s.series_name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1.5">
-                <Label className="text-xs">Size *</Label>
-                <Input className="h-9" value={form.size} onChange={e => setForm(f => ({ ...f, size: e.target.value }))} placeholder='e.g. 1"' />
+                <Label className="text-xs font-medium">Size *</Label>
+                <Input className="h-9 text-sm" value={form.size} onChange={e => setForm(f => ({ ...f, size: e.target.value }))} placeholder='e.g. 1"' />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Rating *</Label>
-                <Input className="h-9" value={form.rating} onChange={e => setForm(f => ({ ...f, rating: e.target.value }))} placeholder='e.g. 150#' />
+                <Label className="text-xs font-medium">Rating *</Label>
+                <Input className="h-9 text-sm" value={form.rating} onChange={e => setForm(f => ({ ...f, rating: e.target.value }))} placeholder='e.g. 150#' />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Type Key</Label>
-                <Input className="h-9" value={form.type_key} onChange={e => setForm(f => ({ ...f, type_key: e.target.value }))} placeholder='e.g. Flanged' />
+                <Label className="text-xs font-medium">Type Key</Label>
+                <Input className="h-9 text-sm" value={form.type_key} onChange={e => setForm(f => ({ ...f, type_key: e.target.value }))} placeholder='e.g. Flanged' />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label className="text-xs">Material *</Label>
+                <Label className="text-xs font-medium">Material *</Label>
                 <Select value={form.material_id} onValueChange={v => setForm(f => ({ ...f, material_id: v ?? '' }))}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Select" /></SelectTrigger>
-                  <SelectContent>
+                  <SelectTrigger className="h-9 text-sm w-full">
+                    <SelectValue>{form.material_id ? getMaterialDisplay(form.material_id) : 'Select'}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className="w-full">
                     {materials.map(m => <SelectItem key={m.id} value={m.id}>{m.material_name} ({m.material_group})</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Fixed Price (₹) *</Label>
-                <Input className="h-9" type="number" min="0" value={form.fixed_price} onChange={e => setForm(f => ({ ...f, fixed_price: Number(e.target.value) }))} />
+                <Label className="text-xs font-medium">Fixed Price (₹) *</Label>
+                <Input className="h-9 text-sm w-full" type="number" min="0" value={form.fixed_price} onChange={e => setForm(f => ({ ...f, fixed_price: Number(e.target.value) }))} />
               </div>
             </div>
-            <Button className="w-full" onClick={handleSave} disabled={saving}>
+
+            <Button className="w-full mt-2" onClick={handleSave} disabled={saving} size="sm">
               {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               {editing ? 'Update' : 'Add'} Entry
             </Button>
