@@ -16,7 +16,7 @@ import {
   ChevronLeft, ChevronRight, Plus, Trash2, Copy, Save, Loader2,
   Settings2, Package, Calculator, CheckCircle, FileText, AlertTriangle
 } from 'lucide-react';
-import { calculateProductPrice, calculateQuoteTotal, roundToNearest10, convertToUSD } from '@/lib/pricingEngine';
+import { calculateProductPrice, calculateQuoteTotal, roundToNearest10, convertToUSD, lineToUSD } from '@/lib/pricingEngine';
 import type { Customer } from '@/types';
 
 // REMOVED: const TRIM_TYPES and const SEAL_TYPES — now loaded from DB
@@ -985,6 +985,9 @@ function StepProducts({
   const fmt = (v: number) => isIntl
     ? `$${convertToUSD(v, exchangeRate).toLocaleString('en-US')}`
     : `₹${v.toLocaleString('en-IN')}`;
+  const fmtLine = (unitPriceINR: number, qty: number) => isIntl
+    ? `$${lineToUSD(unitPriceINR, qty, exchangeRate).toLocaleString('en-US')}`
+    : `₹${(unitPriceINR * qty).toLocaleString('en-IN')}`;
 
   // Helper: get material name by id and group
   const getMatName = (group: string, id: string) => {
@@ -1680,7 +1683,7 @@ function StepProducts({
                       <p className="text-xs text-muted-foreground">Unit Price</p>
                       <p className="text-lg font-bold">{fmt(product.unit_price)}</p>
                       {isIntl && <p className="text-xs text-muted-foreground">(₹{product.unit_price.toLocaleString('en-IN')} INR)</p>}
-                      <p className="text-xs text-muted-foreground">Line Total: {fmt(product.line_total)}</p>
+                      <p className="text-xs text-muted-foreground">Line Total: {fmtLine(product.unit_price, product.quantity)}</p>
                       {isIntl && <p className="text-[10px] text-muted-foreground">(₹{product.line_total.toLocaleString('en-IN')} INR)</p>}
                     </div>
                   )}
@@ -1787,6 +1790,11 @@ function StepLineItemsPricing({
     isIntl
       ? `$${Math.round(v / (exchangeRate || 83.5)).toLocaleString('en-US')}`
       : `\u20b9${v.toLocaleString('en-IN')}`;
+
+  const fmtLine = (unitPriceINR: number, qty: number) =>
+    isIntl
+      ? `$${lineToUSD(unitPriceINR, qty, exchangeRate || 83.5).toLocaleString('en-US')}`
+      : `\u20b9${(unitPriceINR * qty).toLocaleString('en-IN')}`;
 
   const anyUncalculated = store.products.some(p => p.unit_price <= 0);
 
@@ -1934,7 +1942,7 @@ function StepLineItemsPricing({
                     </td>
                     <td className="px-4 py-3 text-right">
                       {p.line_total > 0 && !p.has_pricing_errors ? (
-                        <span className="font-bold text-xs">{fmt(p.line_total)}</span>
+                        <span className="font-bold text-xs">{fmtLine(p.unit_price, p.quantity)}</span>
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
@@ -1955,7 +1963,7 @@ function StepLineItemsPricing({
         <div className="rounded-lg border bg-muted/20 px-6 py-3 space-y-1 text-sm min-w-[220px]">
           <div className="flex justify-between gap-8">
             <span className="text-muted-foreground">Products Subtotal</span>
-            <span className="font-bold">{fmt(store.products.reduce((s, p) => s + p.line_total, 0))}</span>
+            <span className="font-bold">{isIntl ? `$${store.products.reduce((s, p) => s + lineToUSD(p.unit_price, p.quantity, exchangeRate || 83.5), 0).toLocaleString('en-US')}` : `₹${store.products.reduce((s, p) => s + p.line_total, 0).toLocaleString('en-IN')}`}</span>
           </div>
           {isDealer && store.agent_commission_pct > 0 && (
             <p className="text-[10px] text-violet-600 dark:text-violet-400">
@@ -2050,7 +2058,7 @@ function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Cu
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-semibold">{fmt(p.unit_price)}</p>
-                  <p className="text-xs text-muted-foreground">Line: {fmt(p.line_total)}</p>
+                  <p className="text-xs text-muted-foreground">Line: {isIntl ? `$${lineToUSD(p.unit_price, p.quantity, exchangeRate).toLocaleString('en-US')}` : `₹${p.line_total.toLocaleString('en-IN')}`}</p>
                 </div>
               </div>
             ))}

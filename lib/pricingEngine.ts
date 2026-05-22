@@ -205,3 +205,13 @@ export function convertToUSD(amountINR: number, exchangeRate: number): number {
   if (exchangeRate <= 0) return 0;
   return Math.round(amountINR / exchangeRate);
 }
+
+/**
+ * Convert a line total to USD by rounding the unit price first, then multiplying by quantity.
+ * This avoids the rounding inconsistency where round(unit) × qty ≠ round(unit × qty).
+ * Example: unit=₹8320, qty=2, rate=83.5 → round(99.64)×2 = $200 (not round(199.28) = $199).
+ */
+export function lineToUSD(unitPriceINR: number, quantity: number, exchangeRate: number): number {
+  if (exchangeRate <= 0) return 0;
+  return Math.round(unitPriceINR / exchangeRate) * quantity;
+}
