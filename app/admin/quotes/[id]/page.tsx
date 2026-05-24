@@ -23,19 +23,19 @@ export default function AdminQuoteDetailPage({ params }: { params: Promise<{ id:
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [downloadingExcel, setDownloadingExcel] = useState(false);
-  const [exchangeRate, setExchangeRate] = useState(83.5);
+  const [exchangeRate, setExchangeRate] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [quoteRes, prodRes, settingsRes] = await Promise.all([
+    const [quoteRes, prodRes] = await Promise.all([
       supabase.from('quotes').select('*, customer:customers(*), created_by_profile:profiles!quotes_created_by_fkey(full_name)').eq('id', id).single(),
       supabase.from('quote_products').select('*').eq('quote_id', id).order('sort_order'),
-      supabase.from('global_settings').select('value').eq('key', 'exchange_rate').single(),
     ]);
-    setQuote(quoteRes.data);
+    const q = quoteRes.data;
+    setQuote(q);
     setProducts(prodRes.data ?? []);
-    const exRate = (settingsRes.data?.value as { usd_to_inr: number })?.usd_to_inr ?? 83.5;
-    setExchangeRate(exRate);
+    // Use the rate the quote was saved with, not the current global rate
+    setExchangeRate(Number(q?.exchange_rate_snapshot ?? 0));
     setLoading(false);
   }, [id]);
 

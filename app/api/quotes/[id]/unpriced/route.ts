@@ -39,16 +39,14 @@ export async function GET(
       .eq('id', quote.created_by)
       .single();
 
-    const [companyRes, exRateRes] = await Promise.all([
-      supabase.from('global_settings').select('value').eq('key', 'company_info').single(),
-      supabase.from('global_settings').select('value').eq('key', 'exchange_rate').single(),
-    ]);
+    const companyRes = await supabase.from('global_settings').select('value').eq('key', 'company_info').single();
 
     const company = (companyRes.data?.value as { name: string; address: string }) ?? {
       name: 'Unicorn Valves Private Limited',
       address: 'Coimbatore, Tamil Nadu, India',
     };
-    const exchangeRate = (exRateRes.data?.value as { usd_to_inr: number })?.usd_to_inr ?? 83.5;
+    // Use the rate the quote was saved with
+    const exchangeRate = Number(quote.exchange_rate_snapshot ?? 0);
 
     const customer = quote.customer as {
       name: string; company?: string; address?: string; country: string; is_international: boolean;
