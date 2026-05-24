@@ -321,7 +321,10 @@ interface CompleteQuoteProps {
     custom_pricing_title?: string;
     custom_pricing_price: number;
     subtotal_inr: number;
+    tax_amount_inr: number;
+    grand_total_inr: number;
   };
+  mode?: 'complete' | 'price-summary' | 'unpriced-summary';
   customer: {
     name: string;
     company?: string;
@@ -348,7 +351,7 @@ interface CompleteQuoteProps {
   exchangeRate: number;
 }
 
-export function CompleteQuotePDF({ quote, customer, products, creator, company, exchangeRate }: CompleteQuoteProps) {
+export function CompleteQuotePDF({ quote, mode = 'complete', customer, products, creator, company, exchangeRate }: CompleteQuoteProps) {
   const isIntl = customer.is_international;
   const cur = isIntl ? 'USD' : 'INR';
   const sym = isIntl ? '$' : '₹';
@@ -356,7 +359,9 @@ export function CompleteQuotePDF({ quote, customer, products, creator, company, 
     if (!isIntl) return inr;
     return exchangeRate > 0 ? inr / exchangeRate : 0;
   };
+  const isUnpriced = mode === 'unpriced-summary';
   const fmt = (inr: number) => {
+    if (isUnpriced) return 'Quoted';
     const v = conv(inr);
     if (isIntl) {
       return `${sym} ${Math.round(v).toLocaleString('en-US')}`;
@@ -367,7 +372,7 @@ export function CompleteQuotePDF({ quote, customer, products, creator, company, 
   const fmtDate = (iso: string) => {
     const d = new Date(iso);
     const day = String(d.getDate()).padStart(2, '0');
-    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+    const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
     return `${day}-${mon}-${d.getFullYear()}`;
   };
   const dateLong = fmtDate(quote.created_at);
@@ -380,6 +385,11 @@ export function CompleteQuotePDF({ quote, customer, products, creator, company, 
   const packing = quote.packing_price || 0;
   const customExtra = quote.custom_pricing_price || 0;
   const totalExWorks = exWorksTotal + packing + customExtra;
+  const freight = quote.freight_price || 0;
+  const isForSite = quote.pricing_type === 'for-site';
+  const totalWithFreight = totalExWorks + (isForSite ? freight : 0);
+  const gstAmount = quote.tax_amount_inr || 0;
+  const grandTotal = quote.grand_total_inr || 0;
 
   const paymentTerms = [
     `${quote.payment_advance_pct}% advance against PO`,
@@ -399,73 +409,106 @@ export function CompleteQuotePDF({ quote, customer, products, creator, company, 
 
   return (
     <Document>
-      {/* ════════════ PAGE 1 — COVER LETTER ════════════ */}
-      <Page size="A4" style={s.pageBasic}>
-        {LOGO_DATA && <Image style={s.clLogo} src={LOGO_DATA} />}
+      {/* ════════════ PAGE 1 — COVER LETTER (only in complete mode) ════════════ */}
+      {mode === 'complete' && (<>
+        <Page size="A4" style={s.pageBasic}>
+          {LOGO_DATA && <Image style={s.clLogo} src={LOGO_DATA} />}
 
-        <Text style={s.clLocation}>Coimbatore, INDIA</Text>
-        <Text style={s.clDate}>Date: {dateCL}</Text>
+          <Text style={s.clLocation}>Coimbatore, INDIA</Text>
+          <Text style={s.clDate}>Date: {dateCL}</Text>
 
-        <Text style={s.clCustomerLine}>{customer.name}</Text>
-        {customer.company && <Text style={s.clCustomerLine}>{customer.company}</Text>}
-        {customer.address && customer.address.split('\n').map((line, i) => (
-          <Text key={i} style={s.clCustomerLine}>{line}</Text>
-        ))}
-        <Text style={s.clCustomerLine}>{customer.country}</Text>
+          <Text style={s.clCustomerLine}>{customer.name}</Text>
+          {customer.company && <Text style={s.clCustomerLine}>{customer.company}</Text>}
+          {customer.address && customer.address.split('\n').map((line, i) => (
+            <Text key={i} style={s.clCustomerLine}>{line}</Text>
+          ))}
+          <Text style={s.clCustomerLine}>{customer.country}</Text>
 
-        <Text style={s.clSalutation}>Dear Sir/Madam,</Text>
+          <Text style={s.clSalutation}>Dear Sir/Madam,</Text>
 
-        <Text style={s.clBody}>
-          We thank you for the above referred RFQ/Enquiry, and are pleased to submit our techno-commercial offer for your kind consideration.
-        </Text>
+          <Text style={s.clBody}>
+            We thank you for the above referred RFQ/Enquiry, and are pleased to submit our techno-commercial offer for your kind consideration.
+          </Text>
 
-        <Text style={s.clOfferTitle}>Our Offer comprises of the following:</Text>
-        <Text style={s.clListItem}>1.   Covering Letter</Text>
-        <Text style={s.clListItem}>2.   Priced Bid with Commercial Terms and Conditions</Text>
-        <Text style={s.clListItem}>3.   Technical Specifications</Text>
+          <Text style={s.clOfferTitle}>Our Offer comprises of the following:</Text>
+          <Text style={s.clListItem}>1.   Covering Letter</Text>
+          <Text style={s.clListItem}>2.   Priced Bid with Commercial Terms and Conditions</Text>
+          <Text style={s.clListItem}>3.   Technical Specifications</Text>
 
-        <Text style={s.clTrust}>
-          We trust our offer meets your requirements. Should you require any further clarification or technical assistance, please feel free to contact the undersigned.
-        </Text>
-        <Text style={s.clLookForward}>
-          We look forward to receiving your valuable order and assure you of our best services at all times.
-        </Text>
+          <Text style={s.clTrust}>
+            We trust our offer meets your requirements. Should you require any further clarification or technical assistance, please feel free to contact the undersigned.
+          </Text>
+          <Text style={s.clLookForward}>
+            We look forward to receiving your valuable order and assure you of our best services at all times.
+          </Text>
 
-        <Text style={s.clThanking}>Thanking you,</Text>
-        <Text style={s.clYours}>Yours faithfully,</Text>
-        <Text style={s.clForCompany}>For UNICORN VALVES PRIVATE LIMITED</Text>
+          <Text style={s.clThanking}>Thanking you,</Text>
+          <Text style={s.clYours}>Yours faithfully,</Text>
+          <Text style={s.clForCompany}>For UNICORN VALVES PRIVATE LIMITED</Text>
 
-        <View style={s.clSigLine} />
-        <Text style={s.clSigName}>{creator.full_name}</Text>
-        <Text style={s.clSigText}>{creator.designation || 'Assistant Manager - Application Engineering'}</Text>
-        <Text style={s.clSigText}>{creator.department || 'Internal Sales/Marketing Department'}</Text>
-        {creator.phone && <Text style={s.clSigText}>Mobile: {creator.phone}</Text>}
-        {creator.email && <Text style={s.clSigText}>Email: {creator.email}</Text>}
+          <View style={s.clSigLine} />
+          <Text style={s.clSigName}>{creator.full_name}</Text>
+          <Text style={s.clSigText}>{creator.designation || 'Assistant Manager - Application Engineering'}</Text>
+          <Text style={s.clSigText}>{creator.department || 'Internal Sales/Marketing Department'}</Text>
+          {creator.phone && <Text style={s.clSigText}>Mobile: {creator.phone}</Text>}
+          {creator.email && <Text style={s.clSigText}>Email: {creator.email}</Text>}
 
-        <FooterBasic />
-      </Page>
+          <FooterBasic />
+        </Page>
+      </>)}
 
-      {/* ════════════ PAGE 2 — PRICE SUMMARY ════════════ */}
+      {/* ════════════ PRICE SUMMARY PAGE ════════════ */}
       <Page size="A4" style={s.pageSummary}>
         <View style={s.summaryHeader} fixed>
           <Text style={s.summaryHeaderTitle}>Price Summary for Control Valves &amp; Accessories</Text>
           {LOGO_DATA && <Image style={s.summaryHeaderLogo} src={LOGO_DATA} />}
         </View>
 
+        {/* Unpriced heading */}
+        {isUnpriced && (
+          <View style={{ alignItems: 'center', marginBottom: 8 }}>
+            <Text style={{ fontSize: 12, fontWeight: 700, textDecoration: 'underline' }}>PRICE SUMMARY (UNPRICED)</Text>
+          </View>
+        )}
+
         {/* Meta grid */}
         <View style={s.metaGrid}>
-          <View style={s.metaRow}>
-            <View style={s.metaCol}><Text style={s.metaLabel}>Customer:</Text><Text style={s.metaValue}>{customer.name}</Text></View>
-            <View style={s.metaCol}><Text style={s.metaLabel}>Unicorn Ref:</Text><Text style={s.metaValue}>{quote.quote_number}</Text></View>
-          </View>
-          <View style={s.metaRow}>
-            <View style={s.metaCol}><Text style={s.metaLabel}>Enquiry Ref:</Text><Text style={s.metaValue}>{quote.enquiry_id || '—'}</Text></View>
-            <View style={s.metaCol}><Text style={s.metaLabel}>Date:</Text><Text style={s.metaValue}>{dateLong}</Text></View>
-          </View>
-          {quote.project_name && (
-            <View style={s.metaRow}>
-              <View style={s.metaCol}><Text style={s.metaLabel}>Project:</Text><Text style={s.metaValue}>{quote.project_name}</Text></View>
-            </View>
+          {isUnpriced ? (
+            <>
+              <View style={s.metaRow}>
+                <View style={s.metaCol}><Text style={s.metaLabel}>Quote No:</Text><Text style={s.metaValue}>{quote.quote_number}</Text></View>
+              </View>
+              <View style={s.metaRow}>
+                <View style={s.metaCol}><Text style={s.metaLabel}>Date:</Text><Text style={s.metaValue}>{dateLong}</Text></View>
+              </View>
+              <View style={s.metaRow}>
+                <View style={s.metaCol}><Text style={s.metaLabel}>Customer:</Text><Text style={s.metaValue}>{customer.name}</Text></View>
+              </View>
+              {quote.project_name && (
+                <View style={s.metaRow}>
+                  <View style={s.metaCol}><Text style={s.metaLabel}>Project:</Text><Text style={s.metaValue}>{quote.project_name}</Text></View>
+                </View>
+              )}
+              <View style={s.metaRow}>
+                <View style={s.metaCol}><Text style={s.metaLabel}>Enquiry Ref:</Text><Text style={s.metaValue}>{quote.enquiry_id || '—'}</Text></View>
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={s.metaRow}>
+                <View style={s.metaCol}><Text style={s.metaLabel}>Customer:</Text><Text style={s.metaValue}>{customer.name}</Text></View>
+                <View style={s.metaCol}><Text style={s.metaLabel}>Unicorn Ref:</Text><Text style={s.metaValue}>{quote.quote_number}</Text></View>
+              </View>
+              <View style={s.metaRow}>
+                <View style={s.metaCol}><Text style={s.metaLabel}>Enquiry Ref:</Text><Text style={s.metaValue}>{quote.enquiry_id || '—'}</Text></View>
+                <View style={s.metaCol}><Text style={s.metaLabel}>Date:</Text><Text style={s.metaValue}>{dateLong}</Text></View>
+              </View>
+              {quote.project_name && (
+                <View style={s.metaRow}>
+                  <View style={s.metaCol}><Text style={s.metaLabel}>Project:</Text><Text style={s.metaValue}>{quote.project_name}</Text></View>
+                </View>
+              )}
+            </>
           )}
         </View>
 
@@ -515,15 +558,27 @@ export function CompleteQuotePDF({ quote, customer, products, creator, company, 
               <Text style={s.totValue}>{fmt(packing)}</Text>
             </View>
           )}
+          {isForSite && (
+            <View style={s.totRow}>
+              <Text style={s.totLabel}>Freight Charges</Text>
+              <Text style={s.totValue}>{fmt(freight)}</Text>
+            </View>
+          )}
           {quote.custom_pricing_title && customExtra > 0 && (
             <View style={s.totRow}>
               <Text style={s.totLabel}>{quote.custom_pricing_title}</Text>
               <Text style={s.totValue}>{fmt(customExtra)}</Text>
             </View>
           )}
+          {!isIntl && gstAmount > 0 && (
+            <View style={s.totRow}>
+              <Text style={s.totLabel}>GST(18 %)</Text>
+              <Text style={s.totValue}>{fmt(gstAmount)}</Text>
+            </View>
+          )}
           <View style={[s.totRow, { borderBottomWidth: 0 }]}>
-            <Text style={[s.totLabel, s.totFinal]}>Total Ex-works Price(Excluding Freight/Insurance)</Text>
-            <Text style={[s.totValue, s.totFinal]}>{fmt(totalExWorks)}</Text>
+            <Text style={[s.totLabel, s.totFinal]}>{isForSite ? 'Total F.O.R. Site Price (Excluding Insurance)' : 'Total Ex-works Price(Excluding Freight/Insurance)'}</Text>
+            <Text style={[s.totValue, s.totFinal]}>{fmt(!isIntl && gstAmount > 0 ? grandTotal : totalWithFreight)}</Text>
           </View>
         </View>
 
@@ -532,7 +587,7 @@ export function CompleteQuotePDF({ quote, customer, products, creator, company, 
         <View style={s.termsTable}>
           <View style={s.termRow}>
             <Text style={s.termLabel}>Prices</Text>
-            <Text style={s.termValue}>Ex-Works {cur} each net</Text>
+            <Text style={s.termValue}>{isForSite ? 'F.O.R.' : 'Ex-Works'} {cur} each net</Text>
           </View>
           <View style={s.termRow}>
             <Text style={s.termLabel}>Validity</Text>
@@ -550,10 +605,12 @@ export function CompleteQuotePDF({ quote, customer, products, creator, company, 
             <Text style={s.termLabel}>Payment Terms</Text>
             <Text style={s.termValue}>{paymentTerms}</Text>
           </View>
-          <View style={s.termRow}>
-            <Text style={s.termLabel}>Freight</Text>
-            <Text style={s.termValue}>{quote.freight_price > 0 ? `Included: ${fmt(quote.freight_price)}` : 'To be borne by buyer'}</Text>
-          </View>
+          {!isForSite && (
+            <View style={s.termRow}>
+              <Text style={s.termLabel}>Freight</Text>
+              <Text style={s.termValue}>{quote.freight_price > 0 ? `Included: ${fmt(quote.freight_price)}` : 'To be borne by buyer'}</Text>
+            </View>
+          )}
           <View style={s.termRow}>
             <Text style={s.termLabel}>Insurance</Text>
             <Text style={s.termValue}>To be arranged by buyer</Text>
@@ -570,214 +627,216 @@ export function CompleteQuotePDF({ quote, customer, products, creator, company, 
         <FooterBasic />
       </Page>
 
-      {/* ════════════ PAGES 3-6 — T&C ════════════ */}
-      {/* T&C Page 1 */}
-      <Page size="A4" style={s.pageTC}>
-        <View style={s.tcHeader} fixed>
-          <Text style={s.tcHeaderTitle}>COMMERCIAL TERMS &amp; CONDITIONS</Text>
-          {LOGO_DATA && <Image style={s.tcHeaderLogo} src={LOGO_DATA} />}
-        </View>
+      {/* ════════════ PAGES 3-6 — T&C (only in complete mode) ════════════ */}
+      {mode === 'complete' && (<>
+        {/* T&C Page 1 */}
+        <Page size="A4" style={s.pageTC}>
+          <View style={s.tcHeader} fixed>
+            <Text style={s.tcHeaderTitle}>COMMERCIAL TERMS &amp; CONDITIONS</Text>
+            {LOGO_DATA && <Image style={s.tcHeaderLogo} src={LOGO_DATA} />}
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSectionHead}>ACCEPTANCE AND CONTRACT FORMATION</Text>
-          <Text style={s.tcBody}>
-            This offer follows Standard Conditions of Sale of materials involving Valves, Actuators, Accessories, Spare Parts, Services being an essential part of the Sellers offer. Buyers proposed Terms and Conditions, cannot be incorporated into any contract between the seller &amp; Buyer unless document purporting to modify due to supplementing the Terms &amp; Conditions shall be binding unless negotiated and signed by both the buyer &amp; Seller.
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSectionHead}>ACCEPTANCE AND CONTRACT FORMATION</Text>
+            <Text style={s.tcBody}>
+              This offer follows Standard Conditions of Sale of materials involving Valves, Actuators, Accessories, Spare Parts, Services being an essential part of the Sellers offer. Buyers proposed Terms and Conditions, cannot be incorporated into any contract between the seller &amp; Buyer unless document purporting to modify due to supplementing the Terms &amp; Conditions shall be binding unless negotiated and signed by both the buyer &amp; Seller.
+            </Text>
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSubHead}>Taxes &amp; Duties *</Text>
-          <Text style={s.tcIndentBold}>=   Sale transaction within India</Text>
-          <Text style={s.tcIndent}>GST applicable @ 18% for Valves, Actuators, Spares &amp; Services and 28% for selective Accessories.</Text>
-          <Text style={s.tcIndentBold}>=   Sale transaction outside India</Text>
-          <Text style={s.tcIndent}>Nil Duties. However, any duties applicable at the time of dispatch will be to the buyer account</Text>
-          <Text style={s.tcDutyNote}>*-  Prevailing Duties for exports and GST will be applicable at the time of dispatches.</Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSubHead}>Taxes &amp; Duties *</Text>
+            <Text style={s.tcIndentBold}>=   Sale transaction within India</Text>
+            <Text style={s.tcIndent}>GST applicable @ 18% for Valves, Actuators, Spares &amp; Services and 28% for selective Accessories.</Text>
+            <Text style={s.tcIndentBold}>=   Sale transaction outside India</Text>
+            <Text style={s.tcIndent}>Nil Duties. However, any duties applicable at the time of dispatch will be to the buyer account</Text>
+            <Text style={s.tcDutyNote}>*-  Prevailing Duties for exports and GST will be applicable at the time of dispatches.</Text>
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSectionHead}>PAYMENTS</Text>
-          <Text style={s.tcBody}>
-            Unless agreed between the Buyer and Seller. the terms of Payment shall be 40% advance along with the Purchase Order and balance upon readiness of material at the sellers premises against an Invoice. Pro rata payments shall be made by the buyer for partial shipments. Delay in payment despite reminders will accrue 1% per month or legally accepted maximum amount to be charged. In the event of any unforeseen delivery prevention / work postponement, by the Buyer, all dates of payment related to delivery shall relate instead of date of completion of manufacturing/service. Seller will require cash payment or security deposit before the revised delivery schedules.
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSectionHead}>PAYMENTS</Text>
+            <Text style={s.tcBody}>
+              Unless agreed between the Buyer and Seller. the terms of Payment shall be 40% advance along with the Purchase Order and balance upon readiness of material at the sellers premises against an Invoice. Pro rata payments shall be made by the buyer for partial shipments. Delay in payment despite reminders will accrue 1% per month or legally accepted maximum amount to be charged. In the event of any unforeseen delivery prevention / work postponement, by the Buyer, all dates of payment related to delivery shall relate instead of date of completion of manufacturing/service. Seller will require cash payment or security deposit before the revised delivery schedules.
+            </Text>
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSubHead}>Delivery Period</Text>
-          <Text style={s.tcBody}>
-            Offered shipment dates are estimates and indicates the availability of the goods at the Sellers facility. Shipment Dates shall commence after receipt of technically and commercially clear Purchase Order and advance payment if any, whereby, the Purchase Order carries all the final technical information, resolution of engineering, and / or commercial issues or Buyers mutually approved drawings.
-          </Text>
-          <Text style={s.tcBody}>
-            Delays resulting in none compliance to the above clause, shall extend the offered shipping dates proportionately or by mutual agreement between the buyer and seller and may result in an increase in the price of the goods and waiver of claims due to delay.
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSubHead}>Delivery Period</Text>
+            <Text style={s.tcBody}>
+              Offered shipment dates are estimates and indicates the availability of the goods at the Sellers facility. Shipment Dates shall commence after receipt of technically and commercially clear Purchase Order and advance payment if any, whereby, the Purchase Order carries all the final technical information, resolution of engineering, and / or commercial issues or Buyers mutually approved drawings.
+            </Text>
+            <Text style={s.tcBody}>
+              Delays resulting in none compliance to the above clause, shall extend the offered shipping dates proportionately or by mutual agreement between the buyer and seller and may result in an increase in the price of the goods and waiver of claims due to delay.
+            </Text>
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSubHead}>Cancellation / Termination  charges</Text>
-          <Text style={s.tcBody}>After acceptance of the order, following cancelation charges are to be paid towards compensation: -</Text>
-          <Text style={s.tcBullet}>Immediately after release of PO but within 14 days - 10 % of order value</Text>
-          <Text style={s.tcBullet}>Between 14th Day and 45 days – 25% of order Value</Text>
-          <Text style={s.tcBullet}>After 45 days from the date of PO - 50 % of order value</Text>
-          <Text style={s.tcBullet}>After completion of manufacture of items at our works - 100 % order value</Text>
-          <Text style={[s.tcBody, { marginTop: 4 }]}>
-            Seller may declare Buyer in default and terminate this Agreement in the event Buyer fails to make any payment to Seller when due or otherwise commits a material breach of this Agreement. Buyer
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSubHead}>Cancellation / Termination  charges</Text>
+            <Text style={s.tcBody}>After acceptance of the order, following cancelation charges are to be paid towards compensation: -</Text>
+            <Text style={s.tcBullet}>Immediately after release of PO but within 14 days - 10 % of order value</Text>
+            <Text style={s.tcBullet}>Between 14th Day and 45 days – 25% of order Value</Text>
+            <Text style={s.tcBullet}>After 45 days from the date of PO - 50 % of order value</Text>
+            <Text style={s.tcBullet}>After completion of manufacture of items at our works - 100 % order value</Text>
+            <Text style={[s.tcBody, { marginTop: 4 }]}>
+              Seller may declare Buyer in default and terminate this Agreement in the event Buyer fails to make any payment to Seller when due or otherwise commits a material breach of this Agreement. Buyer
+            </Text>
+          </View>
 
-        <View style={s.tcPageRow} fixed>
-          <Text style={s.tcPageNum}>1</Text>
-          <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
-        </View>
-        <FooterTC />
-      </Page>
+          <View style={s.tcPageRow} fixed>
+            <Text style={s.tcPageNum}>1</Text>
+            <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
+          </View>
+          <FooterTC />
+        </Page>
 
-      {/* T&C Page 2 */}
-      <Page size="A4" style={s.pageTC}>
-        <View style={s.tcHeader} fixed>
-          <Text style={s.tcHeaderTitle}>COMMERCIAL TERMS &amp; CONDITIONS</Text>
-          {LOGO_DATA && <Image style={s.tcHeaderLogo} src={LOGO_DATA} />}
-        </View>
+        {/* T&C Page 2 */}
+        <Page size="A4" style={s.pageTC}>
+          <View style={s.tcHeader} fixed>
+            <Text style={s.tcHeaderTitle}>COMMERCIAL TERMS &amp; CONDITIONS</Text>
+            {LOGO_DATA && <Image style={s.tcHeaderLogo} src={LOGO_DATA} />}
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcBody}>
-            may terminate this Agreement at any time, for any reason. Upon any such termination, Buyer shall pay Seller a termination payment compensating Seller for all costs incurred to the date of termination, plus overhead and profit as compiled above. Buyer may suspend Seller&apos;s performance of the work for an aggregate period of up to 90 days, provided that Buyer shall pay to Seller all costs associated with any such suspension. If a suspension of work persists for longer than an aggregate of 90 days, Seller may terminate this Agreement as described above.
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcBody}>
+              may terminate this Agreement at any time, for any reason. Upon any such termination, Buyer shall pay Seller a termination payment compensating Seller for all costs incurred to the date of termination, plus overhead and profit as compiled above. Buyer may suspend Seller&apos;s performance of the work for an aggregate period of up to 90 days, provided that Buyer shall pay to Seller all costs associated with any such suspension. If a suspension of work persists for longer than an aggregate of 90 days, Seller may terminate this Agreement as described above.
+            </Text>
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSubHead}>Inspection, Testing &amp; Expediting</Text>
-          <Text style={s.tcBody}>
-            Unicorn standard Quality Control Plan / Inspection Test Plan is available on request. Purchase Orders resulting from quotation, specifies Quality Assurance requirements which deviate from Unicorn standard plan, the Company will interpret the deviations and include them in a revised QA. plan, which will be sent to customers either before or immediately on receipt of the order. Approval of this plan will be required before the order can be processed into the Company&apos;s manufacturing and procurement systems.
-          </Text>
-          <Text style={s.tcBody}>
-            Any requirement for Customer or Customer nominated third party involvement in Inspection, Testing or Expediting must be clearly defined prior Purchase Order, together with any agreed charges for same. If any changes to defined requirements are made after receipt of Purchase Order, the Company reserves the right to amend costs and/or delivery requirements as necessary.
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSubHead}>Inspection, Testing &amp; Expediting</Text>
+            <Text style={s.tcBody}>
+              Unicorn standard Quality Control Plan / Inspection Test Plan is available on request. Purchase Orders resulting from quotation, specifies Quality Assurance requirements which deviate from Unicorn standard plan, the Company will interpret the deviations and include them in a revised QA. plan, which will be sent to customers either before or immediately on receipt of the order. Approval of this plan will be required before the order can be processed into the Company&apos;s manufacturing and procurement systems.
+            </Text>
+            <Text style={s.tcBody}>
+              Any requirement for Customer or Customer nominated third party involvement in Inspection, Testing or Expediting must be clearly defined prior Purchase Order, together with any agreed charges for same. If any changes to defined requirements are made after receipt of Purchase Order, the Company reserves the right to amend costs and/or delivery requirements as necessary.
+            </Text>
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSubHead}>Documentation &amp; Certification</Text>
-          <Text style={s.tcBody}>
-            As we do not have any indication of your documentation requirements, the prices shown in this quotation include for documentation and certification in accordance with Unicorn valves standard which comprises of:-
-          </Text>
-          <Text style={s.tcBody}>One print of Valve Data sheet</Text>
-          <Text style={s.tcBody}>One print of outline General arrangement drawings. (In general, it will be 2-3 Weeks from receipt of order). *</Text>
-          <Text style={s.tcBody}>One print of body &amp; bonnet EN 10204 3.1 material certificates *</Text>
-          <Text style={s.tcBody}>One print of body hydrostatic and seat leakage test certificates. *</Text>
-          <Text style={s.tcBody}>Extra prints, reproducible or other items of documentation/certification are chargeable extra at cost. *</Text>
-          <Text style={s.tcBody}>*These conditions changes on case to case basis on mutually accepted terms with buyer.</Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSubHead}>Documentation &amp; Certification</Text>
+            <Text style={s.tcBody}>
+              As we do not have any indication of your documentation requirements, the prices shown in this quotation include for documentation and certification in accordance with Unicorn valves standard which comprises of:-
+            </Text>
+            <Text style={s.tcBody}>One print of Valve Data sheet</Text>
+            <Text style={s.tcBody}>One print of outline General arrangement drawings. (In general, it will be 2-3 Weeks from receipt of order). *</Text>
+            <Text style={s.tcBody}>One print of body &amp; bonnet EN 10204 3.1 material certificates *</Text>
+            <Text style={s.tcBody}>One print of body hydrostatic and seat leakage test certificates. *</Text>
+            <Text style={s.tcBody}>Extra prints, reproducible or other items of documentation/certification are chargeable extra at cost. *</Text>
+            <Text style={s.tcBody}>*These conditions changes on case to case basis on mutually accepted terms with buyer.</Text>
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSubHead}>Surface Coating</Text>
-          <Text style={s.tcBody}>
-            The equipment offered in this quotation will be supplied with a surface coating as per Unicorn valves standard unless otherwise specified in the offer datasheet.
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSubHead}>Surface Coating</Text>
+            <Text style={s.tcBody}>
+              The equipment offered in this quotation will be supplied with a surface coating as per Unicorn valves standard unless otherwise specified in the offer datasheet.
+            </Text>
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSubHead}>Warranty</Text>
-          <Text style={s.tcBody}>
-            The supplied material will be warranted against any manufacturing defects for a period of {quote.warranty_installation_months} months from the date of commissioning or {quote.warranty_shipment_months} months from the date of Dispatch, whichever is early. The warranty is null and void if found to be mishandled, not installed properly and are subjected to flow conditions not matching with what was specified in the datasheet.
-          </Text>
-          <Text style={s.tcBody}>
-            Seller warrants that its manufactured goods and services will be free from defects in materials and workmanship. Any Warranty claim must be made in any event, within the earlier of {quote.warranty_installation_months} months from date of initial operation or {quote.warranty_shipment_months} months from delivery. Upon Buyer&apos;s submission of a claim as provided above and substantiation thereof, Seller shall, at its option (i) either repair or replace its
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSubHead}>Warranty</Text>
+            <Text style={s.tcBody}>
+              The supplied material will be warranted against any manufacturing defects for a period of {quote.warranty_installation_months} months from the date of commissioning or {quote.warranty_shipment_months} months from the date of Dispatch, whichever is early. The warranty is null and void if found to be mishandled, not installed properly and are subjected to flow conditions not matching with what was specified in the datasheet.
+            </Text>
+            <Text style={s.tcBody}>
+              Seller warrants that its manufactured goods and services will be free from defects in materials and workmanship. Any Warranty claim must be made in any event, within the earlier of {quote.warranty_installation_months} months from date of initial operation or {quote.warranty_shipment_months} months from delivery. Upon Buyer&apos;s submission of a claim as provided above and substantiation thereof, Seller shall, at its option (i) either repair or replace its
+            </Text>
+          </View>
 
-        <View style={s.tcPageRow} fixed>
-          <Text style={s.tcPageNum}>2</Text>
-          <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
-        </View>
-        <FooterTC />
-      </Page>
+          <View style={s.tcPageRow} fixed>
+            <Text style={s.tcPageNum}>2</Text>
+            <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
+          </View>
+          <FooterTC />
+        </Page>
 
-      {/* T&C Page 3 */}
-      <Page size="A4" style={s.pageTC}>
-        <View style={s.tcHeader} fixed>
-          <Text style={s.tcHeaderTitle}>COMMERCIAL TERMS &amp; CONDITIONS</Text>
-          {LOGO_DATA && <Image style={s.tcHeaderLogo} src={LOGO_DATA} />}
-        </View>
+        {/* T&C Page 3 */}
+        <Page size="A4" style={s.pageTC}>
+          <View style={s.tcHeader} fixed>
+            <Text style={s.tcHeaderTitle}>COMMERCIAL TERMS &amp; CONDITIONS</Text>
+            {LOGO_DATA && <Image style={s.tcHeaderLogo} src={LOGO_DATA} />}
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcBody}>
-            nonconforming goods, or re-perform the services or (ii) refund an equitable portion of the purchase price attributable to such non-conforming goods. Seller shall not be liable for the cost of removal or reinstallation of materials or any unauthorized warranty work, nor shall Seller be responsible for any transportation cost, unless expressly authorized in writing by Seller. Any spare parts provided by Seller hereunder shall be warranted for any defects due to workmanship and to be brought to the notice of the seller, within seven working days after receipt of materials at the buyer&apos;s stores. Seller makes no representation regarding the stocking by Seller of spare parts for the goods. Repair or replacement of goods or refund of an equitable portion of the purchase price shall be Seller&apos;s only obligation and the sole and exclusive remedy of Buyer in the event of a failure to conform to the foregoing warranty. The foregoing warranty is exclusive and in lieu of all other warranties (except that of title), express or implied, including, but not limited to the implied warranties of merchantability or fitness for a particular purpose.
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcBody}>
+              nonconforming goods, or re-perform the services or (ii) refund an equitable portion of the purchase price attributable to such non-conforming goods. Seller shall not be liable for the cost of removal or reinstallation of materials or any unauthorized warranty work, nor shall Seller be responsible for any transportation cost, unless expressly authorized in writing by Seller. Any spare parts provided by Seller hereunder shall be warranted for any defects due to workmanship and to be brought to the notice of the seller, within seven working days after receipt of materials at the buyer&apos;s stores. Seller makes no representation regarding the stocking by Seller of spare parts for the goods. Repair or replacement of goods or refund of an equitable portion of the purchase price shall be Seller&apos;s only obligation and the sole and exclusive remedy of Buyer in the event of a failure to conform to the foregoing warranty. The foregoing warranty is exclusive and in lieu of all other warranties (except that of title), express or implied, including, but not limited to the implied warranties of merchantability or fitness for a particular purpose.
+            </Text>
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSectionHead}>PATENTS/LICENCE</Text>
-          <Text style={s.tcBody}>
-            Seller agrees to indemnify Buyer against, and assume the defense of, any suit for infringement of any Indian patent brought against Buyer by a non-affiliated third party to the extent such suit (i) charges infringement of an apparatus or product claim by Seller&apos;s goods in and of themselves, provided that said goods are built entirely to Seller&apos;s design and (ii) charges infringement of a process or method claim if such infringement results from the normal use of Seller&apos;s goods and is the direct result of Buyer following specific instructions regarding such use furnished by Seller; provided that (a) Buyer notifies Seller in writing of the filing of such suit within ten (10) days after the service of process thereof and (b) Seller is given complete control of the defense of such suit, including the right to defend, settle and make changes in the product for the purpose of avoiding infringement.
-          </Text>
-          <Text style={s.tcBody}>
-            If the goods sold incorporate software or firmware containing software, Buyer is granted a non exclusive, non transferable license to use the software in connection with the normal and intended operation of the goods. Buyer acquires no right or title to the software and will not copy, modify, reverse engineer or compile, disassemble or disclose to any third party all or part of the software, except to the extent that any reduction of the software to human readable form (whether by reverse engineering, decompilation or disassembly) is necessary for the purposes of integrating the operation of the software with the operation of other software or systems used by the Buyer, unless the Seller is prepared to carry out such action at a reasonable commercial fee or has provided the information necessary to achieve such integration within a reasonable period, and the Buyer shall request the Seller to carry out such action or to provide such information (and shall meet the Seller&apos;s reasonable costs in providing that information) before undertaking any such reduction
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSectionHead}>PATENTS/LICENCE</Text>
+            <Text style={s.tcBody}>
+              Seller agrees to indemnify Buyer against, and assume the defense of, any suit for infringement of any Indian patent brought against Buyer by a non-affiliated third party to the extent such suit (i) charges infringement of an apparatus or product claim by Seller&apos;s goods in and of themselves, provided that said goods are built entirely to Seller&apos;s design and (ii) charges infringement of a process or method claim if such infringement results from the normal use of Seller&apos;s goods and is the direct result of Buyer following specific instructions regarding such use furnished by Seller; provided that (a) Buyer notifies Seller in writing of the filing of such suit within ten (10) days after the service of process thereof and (b) Seller is given complete control of the defense of such suit, including the right to defend, settle and make changes in the product for the purpose of avoiding infringement.
+            </Text>
+            <Text style={s.tcBody}>
+              If the goods sold incorporate software or firmware containing software, Buyer is granted a non exclusive, non transferable license to use the software in connection with the normal and intended operation of the goods. Buyer acquires no right or title to the software and will not copy, modify, reverse engineer or compile, disassemble or disclose to any third party all or part of the software, except to the extent that any reduction of the software to human readable form (whether by reverse engineering, decompilation or disassembly) is necessary for the purposes of integrating the operation of the software with the operation of other software or systems used by the Buyer, unless the Seller is prepared to carry out such action at a reasonable commercial fee or has provided the information necessary to achieve such integration within a reasonable period, and the Buyer shall request the Seller to carry out such action or to provide such information (and shall meet the Seller&apos;s reasonable costs in providing that information) before undertaking any such reduction
+            </Text>
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSectionHead}>APPLICABLE LAW</Text>
-          <Text style={s.tcBody}>
-            This Agreement shall be governed by and construed in accordance with Indian Laws. No term of this Agreement shall be enforceable solely by virtue of the Contracts (Rights of Third Parties) by any person who is not a party to this Agreement.
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSectionHead}>APPLICABLE LAW</Text>
+            <Text style={s.tcBody}>
+              This Agreement shall be governed by and construed in accordance with Indian Laws. No term of this Agreement shall be enforceable solely by virtue of the Contracts (Rights of Third Parties) by any person who is not a party to this Agreement.
+            </Text>
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSectionHead}>DISPUTES</Text>
-          <Text style={s.tcBody}>
-            Each party irrevocably agrees to submit to the non-exclusive jurisdiction of Coimbatore courts, Tamil Nadu, India over any claim or matter arising under or in connection with this Agreement.
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSectionHead}>DISPUTES</Text>
+            <Text style={s.tcBody}>
+              Each party irrevocably agrees to submit to the non-exclusive jurisdiction of Coimbatore courts, Tamil Nadu, India over any claim or matter arising under or in connection with this Agreement.
+            </Text>
+          </View>
 
-        <View style={s.tcPageRow} fixed>
-          <Text style={s.tcPageNum}>3</Text>
-          <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
-        </View>
-        <FooterTC />
-      </Page>
+          <View style={s.tcPageRow} fixed>
+            <Text style={s.tcPageNum}>3</Text>
+            <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
+          </View>
+          <FooterTC />
+        </Page>
 
-      {/* T&C Page 4 */}
-      <Page size="A4" style={s.pageTC}>
-        <View style={s.tcHeader} fixed>
-          <Text style={s.tcHeaderTitle}>COMMERCIAL TERMS &amp; CONDITIONS</Text>
-          {LOGO_DATA && <Image style={s.tcHeaderLogo} src={LOGO_DATA} />}
-        </View>
+        {/* T&C Page 4 */}
+        <Page size="A4" style={s.pageTC}>
+          <View style={s.tcHeader} fixed>
+            <Text style={s.tcHeaderTitle}>COMMERCIAL TERMS &amp; CONDITIONS</Text>
+            {LOGO_DATA && <Image style={s.tcHeaderLogo} src={LOGO_DATA} />}
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSectionHead}>LIMITATION OF LIABILITY</Text>
-          <Text style={s.tcBody}>
-            In no event shall Seller be liable for special, incidental, indirect or consequential damages whether for breach of Agreement, breach of warranty, tort or otherwise. The Seller&apos;s liability on all other claims for loss or liability arising out of or connected with this Agreement, or the manufacture, sale, delivery, resale, or use of any parts or equipment covered by this Agreement shall in no case exceed the price of the services or the unit price of such equipment or part hereof involved in the claim. Any release, limitation of liability or other exculpatory language contained herein shall apply regardless of the fault, negligence, or strict liability of the Seller. Notwithstanding the above, nothing in these terms and conditions shall be construed so as to exclude or limit the Seller&apos;s liability for personal injury or death caused by its negligence or for fraudulent misrepresentation.
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSectionHead}>LIMITATION OF LIABILITY</Text>
+            <Text style={s.tcBody}>
+              In no event shall Seller be liable for special, incidental, indirect or consequential damages whether for breach of Agreement, breach of warranty, tort or otherwise. The Seller&apos;s liability on all other claims for loss or liability arising out of or connected with this Agreement, or the manufacture, sale, delivery, resale, or use of any parts or equipment covered by this Agreement shall in no case exceed the price of the services or the unit price of such equipment or part hereof involved in the claim. Any release, limitation of liability or other exculpatory language contained herein shall apply regardless of the fault, negligence, or strict liability of the Seller. Notwithstanding the above, nothing in these terms and conditions shall be construed so as to exclude or limit the Seller&apos;s liability for personal injury or death caused by its negligence or for fraudulent misrepresentation.
+            </Text>
+          </View>
 
-        <View style={s.tcSection}>
-          <Text style={s.tcSubHead}>Liability Cap</Text>
-          <Text style={s.tcBody}>
-            &apos;Notwithstanding anything to the contrary in these or any applicable conditions the Supplier&apos;s total liability for all damages in the aggregate (including damages caused by breach of contract, tort or statutory duty) shall not exceed the Contract price nor shall the Supplier be liable for any special indirect economic or consequential damages or losses such as but not limited to loss of revenue, loss of profit, loss of contract, loss of use, loss of production, costs of capital or costs connected
-          </Text>
-          <Text style={s.tcBody}>
-            With operation, accepting that nothing contained in this clause shall be construed as an attempt to exclude or limit liability for:-
-          </Text>
-          <Text style={s.tcBody}>Death or personal injury to any person or</Text>
-          <Text style={s.tcBody}>Claims from third parties in tort, or</Text>
-          <Text style={s.tcBody}>Accidental damage as covered by the Supplier&apos;s insurance policies or</Text>
-          <Text style={s.tcBody}>Breach of confidentiality obligations or patent infringement obligations&apos;</Text>
-          <Text style={s.tcBody}>
-            We trust you will find our offer of interest, and look forward to the receipt of your further instructions, which will receive our immediate attention.
-          </Text>
-        </View>
+          <View style={s.tcSection}>
+            <Text style={s.tcSubHead}>Liability Cap</Text>
+            <Text style={s.tcBody}>
+              &apos;Notwithstanding anything to the contrary in these or any applicable conditions the Supplier&apos;s total liability for all damages in the aggregate (including damages caused by breach of contract, tort or statutory duty) shall not exceed the Contract price nor shall the Supplier be liable for any special indirect economic or consequential damages or losses such as but not limited to loss of revenue, loss of profit, loss of contract, loss of use, loss of production, costs of capital or costs connected
+            </Text>
+            <Text style={s.tcBody}>
+              With operation, accepting that nothing contained in this clause shall be construed as an attempt to exclude or limit liability for:-
+            </Text>
+            <Text style={s.tcBody}>Death or personal injury to any person or</Text>
+            <Text style={s.tcBody}>Claims from third parties in tort, or</Text>
+            <Text style={s.tcBody}>Accidental damage as covered by the Supplier&apos;s insurance policies or</Text>
+            <Text style={s.tcBody}>Breach of confidentiality obligations or patent infringement obligations&apos;</Text>
+            <Text style={s.tcBody}>
+              We trust you will find our offer of interest, and look forward to the receipt of your further instructions, which will receive our immediate attention.
+            </Text>
+          </View>
 
-        <View style={[s.tcSection, { marginTop: 14 }]}>
-          <Text style={[s.tcBody, { fontWeight: 700 }]}>Yours faithfully</Text>
-          <Text style={[s.tcBody, { fontWeight: 700, marginBottom: 24 }]}>For UNICORN VALVES PVT. LTD</Text>
-          <Text style={[s.tcBody, { fontWeight: 700, marginBottom: 2 }]}>{creator.full_name}</Text>
-          <Text style={[s.tcBody, { fontWeight: 700 }]}>{creator.designation || 'Assistant Manager - Application Engineering'} |{creator.department || 'Internal Sales/Marketing Department'}</Text>
-        </View>
+          <View style={[s.tcSection, { marginTop: 14 }]}>
+            <Text style={[s.tcBody, { fontWeight: 700 }]}>Yours faithfully</Text>
+            <Text style={[s.tcBody, { fontWeight: 700, marginBottom: 24 }]}>For UNICORN VALVES PVT. LTD</Text>
+            <Text style={[s.tcBody, { fontWeight: 700, marginBottom: 2 }]}>{creator.full_name}</Text>
+            <Text style={[s.tcBody, { fontWeight: 700 }]}>{creator.designation || 'Assistant Manager - Application Engineering'} |{creator.department || 'Internal Sales/Marketing Department'}</Text>
+          </View>
 
-        <View style={s.tcPageRow} fixed>
-          <Text style={s.tcPageNum}>4</Text>
-          <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
-        </View>
-        <FooterTC />
-      </Page>
+          <View style={s.tcPageRow} fixed>
+            <Text style={s.tcPageNum}>4</Text>
+            <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
+          </View>
+          <FooterTC />
+        </Page>
+      </>)}
     </Document>
   );
 }

@@ -78,6 +78,38 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
     setDownloadingPdf(false);
   }
 
+  async function downloadPriceSummary() {
+    setDownloadingPdf(true);
+    try {
+      const res = await fetch(`/api/quotes/${id}/price-summary`);
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${quote?.quote_number?.replace(/\//g, '-') ?? 'quote'}_PriceSummary.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error('Failed to generate Price Summary'); }
+    setDownloadingPdf(false);
+  }
+
+  async function downloadUnpriced() {
+    setDownloadingPdf(true);
+    try {
+      const res = await fetch(`/api/quotes/${id}/unpriced`);
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${quote?.quote_number?.replace(/\//g, '-') ?? 'quote'}_Unpriced.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error('Failed to generate Unpriced Summary'); }
+    setDownloadingPdf(false);
+  }
+
   async function downloadExcel() {
     setDownloadingExcel(true);
     try {
@@ -153,6 +185,12 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={downloadCoverLetter}>
                 <FileText className="w-4 h-4 mr-2" /> Cover Letter + T&C
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={downloadPriceSummary}>
+                <FileText className="w-4 h-4 mr-2" /> Price Summary Only
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={downloadUnpriced}>
+                <FileText className="w-4 h-4 mr-2" /> Unpriced Summary
               </DropdownMenuItem>
               <DropdownMenuItem onClick={downloadPdf}>
                 <FileText className="w-4 h-4 mr-2" /> Complete Quote

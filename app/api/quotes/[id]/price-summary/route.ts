@@ -85,6 +85,7 @@ export async function GET(
         tax_amount_inr: Number(quote.tax_amount_inr ?? 0),
         grand_total_inr: Number(quote.grand_total_inr ?? 0),
       },
+      mode: 'price-summary',
       customer,
       products: (products ?? []).map(p => ({
         sort_order: p.sort_order,
@@ -107,11 +108,11 @@ export async function GET(
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="${filename}_Complete.pdf"`,
+        'Content-Disposition': `inline; filename="${filename}_PriceSummary.pdf"`,
       },
     });
   } catch (error) {
-    console.error('Complete quote PDF generation error:', error);
-    return NextResponse.json({ error: 'Failed to generate Complete Quote PDF' }, { status: 500 });
+    console.error('Price Summary PDF generation error:', error);
+    return NextResponse.json({ error: 'Failed to generate Price Summary PDF' }, { status: 500 });
   }
 }
