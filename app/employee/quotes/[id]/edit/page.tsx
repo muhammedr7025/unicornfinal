@@ -80,13 +80,14 @@ export default function EditQuotePage({ params }: { params: Promise<{ id: string
         accessories: (accessoriesRes.data ?? []).filter(a => a.quote_product_id === p.id),
       }));
 
-      // Get current exchange rate
-      const { data: rateData } = await supabase
-        .from('global_settings')
-        .select('value')
-        .eq('key', 'exchange_rate')
-        .single();
-      const currentRate = (rateData?.value as { usd_to_inr: number })?.usd_to_inr ?? 83.5;
+      // Get current exchange rate: prefer live API, fallback to DB setting
+      const [rateData, liveRateRes] = await Promise.all([
+        supabase.from('global_settings').select('value').eq('key', 'exchange_rate').single(),
+        fetch('https://api.frankfurter.dev/v2/rate/USD/INR').then(r => r.json()).catch(() => null),
+      ]);
+      const dbRate = (rateData?.data?.value as { usd_to_inr: number })?.usd_to_inr ?? null;
+      const liveRate = typeof liveRateRes?.rate === 'number' ? liveRateRes.rate : null;
+      const currentRate = liveRate ?? dbRate ?? 0;
       const snapshotRate = quote.exchange_rate_snapshot ? Number(quote.exchange_rate_snapshot) : null;
 
       // Load margins based on pricing mode
@@ -107,7 +108,7 @@ export default function EditQuotePage({ params }: { params: Promise<{ id: string
       }
 
       // Check exchange rate change
-      if (snapshotRate && snapshotRate !== currentRate) {
+      if (snapshotRate && currentRate > 0 && Math.abs(snapshotRate - currentRate) > 0.01) {
         setOldRate(snapshotRate);
         setNewRate(currentRate);
         setShowRateDialog(true);
@@ -169,12 +170,12 @@ export default function EditQuotePage({ params }: { params: Promise<{ id: string
 
             <div className="grid grid-cols-2 gap-4">
               <div className="rounded-lg bg-white dark:bg-gray-900 p-3 border">
-                <p className="text-xs text-muted-foreground mb-1">Original Rate</p>
+                <p className="text-xs text-muted-foreground mb-1">Saved Rate</p>
                 <p className="text-xl font-bold text-red-600">₹{oldRate}</p>
                 <p className="text-[10px] text-muted-foreground">1 USD = ₹{oldRate}</p>
               </div>
               <div className="rounded-lg bg-white dark:bg-gray-900 p-3 border border-emerald-300">
-                <p className="text-xs text-muted-foreground mb-1">Current Rate</p>
+                <p className="text-xs text-muted-foreground mb-1">Live Rate</p>
                 <p className="text-xl font-bold text-emerald-600">₹{newRate}</p>
                 <p className="text-[10px] text-muted-foreground">1 USD = ₹{newRate}</p>
               </div>
