@@ -11,7 +11,7 @@ import { Download, Loader2, ArrowLeft, FileSpreadsheet, Shield, Truck, CreditCar
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import Link from 'next/link';
 import { use } from 'react';
-import { convertToUSD } from '@/lib/pricingEngine';
+import { convertToUSD, lineToUSD } from '@/lib/pricingEngine';
 
 export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -104,6 +104,7 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
   const fmt = (v: number) => isIntl ? fmtUSD(v) : fmtINR(v);
 
   const productSubtotal = products.reduce((s, p) => s + Number(p.line_total_inr ?? 0), 0);
+  const productSubtotalUSD = products.reduce((s, p) => s + lineToUSD(Number(p.unit_price_inr ?? 0), p.quantity, exchangeRate), 0);
   const packingPrice = Number(quote.packing_price ?? 0);
   const freightPrice = Number(quote.freight_price ?? 0);
   const subtotalINR = Number(quote.subtotal_inr ?? 0);
@@ -294,7 +295,7 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
                         {isIntl && <TableCell className="text-right text-blue-600 dark:text-blue-400 font-semibold">{fmtUSD(unitINR)}</TableCell>}
                         <TableCell className="text-right font-semibold">{fmtINR(unitINR)}</TableCell>
                         <TableCell className="text-center">{p.quantity}</TableCell>
-                        {isIntl && <TableCell className="text-right text-blue-600 dark:text-blue-400 font-semibold">{fmtUSD(totalINR)}</TableCell>}
+                        {isIntl && <TableCell className="text-right text-blue-600 dark:text-blue-400 font-semibold">${lineToUSD(unitINR, p.quantity, exchangeRate).toLocaleString('en-US')}</TableCell>}
                         <TableCell className="text-right font-semibold">{fmtINR(totalINR)}</TableCell>
                       </TableRow>
                     );
@@ -303,7 +304,7 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
                   {/* Subtotal row */}
                   <TableRow className="bg-muted/30">
                     <TableCell colSpan={isIntl ? 6 : 5} className="text-right font-bold">Subtotal:</TableCell>
-                    {isIntl && <TableCell className="text-right font-bold text-blue-600 dark:text-blue-400">{fmtUSD(productSubtotal)}</TableCell>}
+                    {isIntl && <TableCell className="text-right font-bold text-blue-600 dark:text-blue-400">${productSubtotalUSD.toLocaleString('en-US')}</TableCell>}
                     <TableCell className="text-right font-bold">{fmtINR(productSubtotal)}</TableCell>
                   </TableRow>
 

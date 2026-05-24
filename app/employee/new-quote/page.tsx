@@ -14,9 +14,9 @@ import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import {
   ChevronLeft, ChevronRight, Plus, Trash2, Copy, Save, Loader2,
-  Settings2, Package, Calculator, CheckCircle, FileText, AlertTriangle
+  Settings2, Package, Calculator, CheckCircle, FileText, AlertTriangle, RefreshCw
 } from 'lucide-react';
-import { calculateProductPrice, calculateQuoteTotal, roundToNearest10, convertToUSD } from '@/lib/pricingEngine';
+import { calculateProductPrice, calculateQuoteTotal, roundToNearest10, convertToUSD, lineToUSD } from '@/lib/pricingEngine';
 import type { Customer } from '@/types';
 
 // REMOVED: const TRIM_TYPES and const SEAL_TYPES — now loaded from DB
@@ -69,7 +69,7 @@ export default function NewQuotePage() {
 
   async function loadInitialData() {
     setLoadingData(true);
-    const [custRes, seriesRes, matRes, settingsRes, bwRes, bnwRes, actRes, hwRes, testPresRes, tubePresRes, sealRes, machTypeRes] = await Promise.all([
+    const [custRes, seriesRes, matRes, settingsRes, bwRes, bnwRes, actRes, hwRes, testPresRes, tubePresRes, sealRes, machTypeRes, liveRateRes] = await Promise.all([
       supabase.from('customers').select('*').order('name'),
       supabase.from('series').select('*').eq('is_active', true).order('series_number'),
       supabase.from('materials').select('*').eq('is_active', true),
@@ -82,6 +82,7 @@ export default function NewQuotePage() {
       supabase.from('tubing_presets').select('*').eq('is_active', true),
       supabase.from('seal_ring_prices').select('series_id, seal_type, size, rating').eq('is_active', true),
       supabase.from('machining_prices').select('component, series_id, type_key, size, rating').eq('is_active', true),
+      fetch('https://api.frankfurter.dev/v2/rate/USD/INR').then(r => r.json()).catch(() => null),
     ]);
 
     setCustomers(custRes.data ?? []);
@@ -114,11 +115,14 @@ export default function NewQuotePage() {
       store.setMargins(v);
     }
 
-    // Load exchange rate
+    // Load exchange rate: edit mode uses saved snapshot, new quote uses live API rate, DB value as fallback
     const exSetting = settings.find(s => s.key === 'exchange_rate');
-    if (exSetting) {
-      const v = exSetting.value as { usd_to_inr: number };
-      setExchangeRate(v.usd_to_inr);
+    const dbRate = (exSetting?.value as { usd_to_inr: number } | undefined)?.usd_to_inr ?? 83.5;
+    const liveRate = typeof liveRateRes?.rate === 'number' ? liveRateRes.rate : null;
+    if (store.edit_mode && store.exchange_rate_snapshot) {
+      setExchangeRate(store.exchange_rate_snapshot);
+    } else {
+      setExchangeRate(liveRate ?? dbRate);
     }
 
     setLoadingData(false);
@@ -150,12 +154,21 @@ export default function NewQuotePage() {
       toast.error('Please select all required materials (Body/Bonnet, Plug, Seat, Stem)');
       return;
     }
-    if (product.has_actuator && !product.actuator_model_id) {
-      toast.error('Actuator is selected but model is not fully configured. Please complete Type → Series → Model → Standard/Special selection or uncheck Actuator.');
+    const seriesInfo = series.find(s => s.id === product.series_id);
+    if (seriesInfo?.has_cage && !product.cage_material_id) {
+      toast.error('Please select Cage Material — this series requires a cage');
       return;
     }
-    if (product.has_handwheel && !product.handwheel_model_id) {
-      toast.error('Handwheel is selected but model is not fully configured. Please complete Type → Series → Model → Standard/Special selection or uncheck Handwheel.');
+    if (seriesInfo?.has_seal_ring && !product.seal_ring_type) {
+      toast.error('Please select Seal Ring Type — this series requires a seal ring');
+      return;
+    }
+    if (product.has_actuator && (!product.actuator_type || !product.actuator_series || !product.actuator_model_id || !product.actuator_standard_special)) {
+      toast.error('Actuator is selected but not fully configured. Complete Type → Series → Model → Standard/Special.');
+      return;
+    }
+    if (product.has_handwheel && (!product.handwheel_type || !product.handwheel_series || !product.handwheel_model_id || !product.handwheel_standard_special)) {
+      toast.error('Handwheel is selected but not fully configured. Complete Type → Series → Model → Standard/Special.');
       return;
     }
 
@@ -675,7 +688,7 @@ export default function NewQuotePage() {
 
       {/* Step Content */}
       {store.currentStep === 0 && (
-        <StepCustomerProject customers={customers} />
+        <StepCustomerProject customers={customers} exchangeRate={exchangeRate} onRateChange={setExchangeRate} />
       )}
       {store.currentStep === 1 && (
         <StepProducts series={series} materials={materials} lookupCosts={lookupCosts} customers={customers} exchangeRate={exchangeRate} bodyWeights={bodyWeights} bonnetWeights={bonnetWeights} actuatorModels={actuatorModels} handwheelPrices={handwheelPrices} calculatingId={calculatingId} testingPresets={testingPresets} tubingPresets={tubingPresets} sealRingRows={sealRingRows} machiningTypeRows={machiningTypeRows} />
@@ -722,9 +735,22 @@ export default function NewQuotePage() {
 // STEP 1: Customer & Project
 // ===================================================================
 
-function StepCustomerProject({ customers }: { customers: Customer[] }) {
+function StepCustomerProject({ customers, exchangeRate, onRateChange }: { customers: Customer[]; exchangeRate: number; onRateChange: (rate: number) => void }) {
   const store = useQuoteStore();
   const selectedCustomer = customers.find(c => c.id === store.customer_id);
+  const [loadingRate, setLoadingRate] = useState(false);
+
+  async function refreshRate() {
+    setLoadingRate(true);
+    try {
+      const data = await fetch('https://api.frankfurter.dev/v2/rate/USD/INR').then(r => r.json());
+      if (typeof data?.rate === 'number') onRateChange(data.rate);
+    } catch {
+      toast.error('Failed to fetch live rate');
+    } finally {
+      setLoadingRate(false);
+    }
+  }
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -789,6 +815,23 @@ function StepCustomerProject({ customers }: { customers: Customer[] }) {
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">Standard uses default margins, Project uses project-specific margins.</p>
+          </div>
+          <div className="space-y-2">
+            <Label>Set Dollar Price <span className="text-muted-foreground text-xs">(1 USD = ₹)</span></Label>
+            <div className="flex gap-2">
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={exchangeRate || ''}
+                onChange={(e) => onRateChange(e.target.value === '' ? 0 : Number(e.target.value))}
+                placeholder="e.g. 83.5"
+              />
+              <Button type="button" variant="outline" size="icon" onClick={refreshRate} disabled={loadingRate} title="Fetch live rate">
+                {loadingRate ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">Auto-fetched from live rates. You can override — this rate will be used for all USD conversions in this quote.</p>
           </div>
         </CardContent>
       </Card>
@@ -976,6 +1019,9 @@ function StepProducts({
   const fmt = (v: number) => isIntl
     ? `$${convertToUSD(v, exchangeRate).toLocaleString('en-US')}`
     : `₹${v.toLocaleString('en-IN')}`;
+  const fmtLine = (unitPriceINR: number, qty: number) => isIntl
+    ? `$${lineToUSD(unitPriceINR, qty, exchangeRate).toLocaleString('en-US')}`
+    : `₹${(unitPriceINR * qty).toLocaleString('en-IN')}`;
 
   // Helper: get material name by id and group
   const getMatName = (group: string, id: string) => {
@@ -1272,7 +1318,7 @@ function StepProducts({
                         const m = (materials['Cage'] ?? []).find(m => m.id === v);
                         store.updateProduct(product.id, { cage_material_id: v ?? '', cage_material_name: m?.material_name ?? '' });
                       }}>
-                        <SelectTrigger className="h-9">
+                        <SelectTrigger className={`h-9 ${!product.cage_material_id ? 'border-red-500 border-2' : ''}`}>
                           <SelectValue placeholder="Select">
                             {getMatName('Cage', product.cage_material_id)}
                           </SelectValue>
@@ -1315,7 +1361,7 @@ function StepProducts({
                         const sealTypes = [...new Set(sealRingRows.filter(sr => sr.series_id === product.series_id && sr.size === product.size && sr.rating === product.rating).map(sr => sr.seal_type))];
                         return (
                         <Select value={product.seal_ring_type || ''} onValueChange={(v) => store.updateProduct(product.id, { seal_ring_type: v ?? '' })}>
-                          <SelectTrigger className="h-9"><SelectValue placeholder={sealTypes.length > 0 ? 'Select' : 'No seal types available'} /></SelectTrigger>
+                          <SelectTrigger className={`h-9 ${!product.seal_ring_type ? 'border-red-500 border-2' : ''}`}><SelectValue placeholder={sealTypes.length > 0 ? 'Select' : 'No seal types available'} /></SelectTrigger>
                           <SelectContent>
                             {sealTypes.map((s: string) => (
                               <SelectItem key={s} value={s}>{s}</SelectItem>
@@ -1380,7 +1426,7 @@ function StepProducts({
                 <div className="space-y-1.5">
                   <Label className="text-xs">Actuator Type *</Label>
                   <Select value={product.actuator_type || ''} onValueChange={(v) => store.updateProduct(product.id, { actuator_type: v ?? '', actuator_series: '', actuator_model_id: '', actuator_model_name: '', actuator_standard_special: '' })}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder="Select type..." /></SelectTrigger>
+                    <SelectTrigger className={`h-9 ${!product.actuator_type ? 'border-red-500 border-2' : ''}`}><SelectValue placeholder="Select type..." /></SelectTrigger>
                     <SelectContent>
                       {actTypes.map(t => (<SelectItem key={t} value={t}>{t}</SelectItem>))}
                     </SelectContent>
@@ -1389,7 +1435,7 @@ function StepProducts({
                 <div className="space-y-1.5">
                   <Label className="text-xs">Actuator Series *</Label>
                   <Select value={product.actuator_series || ''} onValueChange={(v) => store.updateProduct(product.id, { actuator_series: v ?? '', actuator_model_id: '', actuator_model_name: '', actuator_standard_special: '' })}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder={product.actuator_type ? 'Select series...' : 'Pick type first'} /></SelectTrigger>
+                    <SelectTrigger className={`h-9 ${!product.actuator_series ? 'border-red-500 border-2' : ''}`}><SelectValue placeholder={product.actuator_type ? 'Select series...' : 'Pick type first'} /></SelectTrigger>
                     <SelectContent>
                       {actSeries.map(s => (<SelectItem key={s} value={s}>{s}</SelectItem>))}
                     </SelectContent>
@@ -1401,7 +1447,7 @@ function StepProducts({
                     const match = actuatorModels.find(a => a.type === product.actuator_type && a.series === product.actuator_series && a.model === v);
                     store.updateProduct(product.id, { actuator_model_name: v ?? '', actuator_model_id: match?.id ?? '', actuator_standard_special: '' });
                   }}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder={product.actuator_series ? 'Select model...' : 'Pick series first'} /></SelectTrigger>
+                    <SelectTrigger className={`h-9 ${!product.actuator_model_id ? 'border-red-500 border-2' : ''}`}><SelectValue placeholder={product.actuator_series ? 'Select model...' : 'Pick series first'} /></SelectTrigger>
                     <SelectContent>
                       {actModels.map(m => (<SelectItem key={m} value={m}>{m}</SelectItem>))}
                     </SelectContent>
@@ -1413,7 +1459,7 @@ function StepProducts({
                     const match = actuatorModels.find(a => a.type === product.actuator_type && a.series === product.actuator_series && a.model === product.actuator_model_name && a.standard_special === v);
                     store.updateProduct(product.id, { actuator_standard_special: v ?? '', actuator_model_id: match?.id ?? '' });
                   }}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder={product.actuator_model_name ? 'Select...' : 'Pick model first'} /></SelectTrigger>
+                    <SelectTrigger className={`h-9 ${!product.actuator_standard_special ? 'border-red-500 border-2' : ''}`}><SelectValue placeholder={product.actuator_model_name ? 'Select...' : 'Pick model first'} /></SelectTrigger>
                     <SelectContent>
                       {actStdSpc.map(s => {
                         const m = actuatorModels.find(a => a.type === product.actuator_type && a.series === product.actuator_series && a.model === product.actuator_model_name && a.standard_special === s);
@@ -1443,12 +1489,13 @@ function StepProducts({
               const hwSeries = [...new Set(handwheelPrices.filter(h => h.type === product.handwheel_type).map(h => h.series))];
               const hwModels = [...new Set(handwheelPrices.filter(h => h.type === product.handwheel_type && h.series === product.handwheel_series).map(h => h.model))];
               const hwStdSpc = [...new Set(handwheelPrices.filter(h => h.type === product.handwheel_type && h.series === product.handwheel_series && h.model === product.handwheel_model_name).map(h => h.standard_special))];
+              const hwErrCls = 'border-red-500 border-2';
               return (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Handwheel Type *</Label>
                   <Select value={product.handwheel_type || ''} onValueChange={(v) => store.updateProduct(product.id, { handwheel_type: v ?? '', handwheel_series: '', handwheel_model_id: '', handwheel_model_name: '', handwheel_standard_special: '' })}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder="Search type..." /></SelectTrigger>
+                    <SelectTrigger className={`h-9 ${!product.handwheel_type ? hwErrCls : ''}`}><SelectValue placeholder="Search type..." /></SelectTrigger>
                     <SelectContent>
                       {hwTypes.map(t => (<SelectItem key={t} value={t}>{t}</SelectItem>))}
                     </SelectContent>
@@ -1457,7 +1504,7 @@ function StepProducts({
                 <div className="space-y-1.5">
                   <Label className="text-xs">Handwheel Series *</Label>
                   <Select value={product.handwheel_series || ''} onValueChange={(v) => store.updateProduct(product.id, { handwheel_series: v ?? '', handwheel_model_id: '', handwheel_model_name: '', handwheel_standard_special: '' })}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder={product.handwheel_type ? 'Search series...' : 'Pick type first'} /></SelectTrigger>
+                    <SelectTrigger className={`h-9 ${!product.handwheel_series ? hwErrCls : ''}`}><SelectValue placeholder={product.handwheel_type ? 'Search series...' : 'Pick type first'} /></SelectTrigger>
                     <SelectContent>
                       {hwSeries.map(s => (<SelectItem key={s} value={s}>{s}</SelectItem>))}
                     </SelectContent>
@@ -1469,7 +1516,7 @@ function StepProducts({
                     const match = handwheelPrices.find(h => h.type === product.handwheel_type && h.series === product.handwheel_series && h.model === v);
                     store.updateProduct(product.id, { handwheel_model_name: v ?? '', handwheel_model_id: match?.id ?? '', handwheel_standard_special: '' });
                   }}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder={product.handwheel_series ? 'Search model...' : 'Pick series first'} /></SelectTrigger>
+                    <SelectTrigger className={`h-9 ${!product.handwheel_model_id ? hwErrCls : ''}`}><SelectValue placeholder={product.handwheel_series ? 'Search model...' : 'Pick series first'} /></SelectTrigger>
                     <SelectContent>
                       {hwModels.map(m => (<SelectItem key={m} value={m}>{m}</SelectItem>))}
                     </SelectContent>
@@ -1481,7 +1528,7 @@ function StepProducts({
                     const match = handwheelPrices.find(h => h.type === product.handwheel_type && h.series === product.handwheel_series && h.model === product.handwheel_model_name && h.standard_special === v);
                     store.updateProduct(product.id, { handwheel_standard_special: v ?? '', handwheel_model_id: match?.id ?? '' });
                   }}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder={product.handwheel_model_name ? 'Select...' : 'Pick model first'} /></SelectTrigger>
+                    <SelectTrigger className={`h-9 ${!product.handwheel_standard_special ? hwErrCls : ''}`}><SelectValue placeholder={product.handwheel_model_name ? 'Select...' : 'Pick model first'} /></SelectTrigger>
                     <SelectContent>
                       {hwStdSpc.map(s => {
                         const m = handwheelPrices.find(h => h.type === product.handwheel_type && h.series === product.handwheel_series && h.model === product.handwheel_model_name && h.standard_special === s);
@@ -1610,53 +1657,99 @@ function StepProducts({
 
 
           {/* ── Discount + Calculate ── */}
-          <Card>
-            <CardContent className="pt-4">
-              <div className="flex items-end gap-3 flex-wrap">
-                <div className="space-y-1.5 w-32">
-                  <Label className="text-xs font-semibold">Discount %</Label>
-                  <Input className="h-9" type="number" min="0" max="100" value={product.discount_pct || ''} onChange={(e) => store.updateProduct(product.id, { discount_pct: e.target.value === '' ? 0 : Number(e.target.value) })} />
-                </div>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => lookupCosts(product.id)} disabled={calculatingId === product.id}>
-                  {calculatingId === product.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Calculator className="w-3.5 h-3.5" />}
-                  {calculatingId === product.id ? 'Calculating...' : 'Calculate Price'}
-                </Button>
-                {product.unit_price > 0 && !product.has_pricing_errors && (
-                  <div className="ml-auto text-right">
-                    <p className="text-xs text-muted-foreground">Unit Price</p>
-                    <p className="text-lg font-bold">{fmt(product.unit_price)}</p>
-                    {isIntl && <p className="text-xs text-muted-foreground">(₹{product.unit_price.toLocaleString('en-IN')} INR)</p>}
-                    <p className="text-xs text-muted-foreground">Line Total: {fmt(product.line_total)}</p>
-                    {isIntl && <p className="text-[10px] text-muted-foreground">(₹{product.line_total.toLocaleString('en-IN')} INR)</p>}
+          {(() => {
+            const missingBodyFields: string[] = [];
+            if (!product.series_id) missingBodyFields.push('Series');
+            if (!product.size) missingBodyFields.push('Size');
+            if (!product.rating) missingBodyFields.push('Rating');
+            if (!product.end_connect_type) missingBodyFields.push('End Connect Type');
+            if (!product.bonnet_type) missingBodyFields.push('Bonnet Type');
+            if (!product.trim_type) missingBodyFields.push('Trim Type');
+            if (!product.body_bonnet_material_id) missingBodyFields.push('Body & Bonnet Material');
+            if (!product.plug_material_id) missingBodyFields.push('Plug Material');
+            if (!product.seat_material_id) missingBodyFields.push('Seat Material');
+            if (!product.stem_material_id) missingBodyFields.push('Stem Material');
+            if (hasCage && !product.cage_material_id) missingBodyFields.push('Cage Material');
+            if (hasSealRing && !product.seal_ring_type) missingBodyFields.push('Seal Ring Type');
+            if (product.has_actuator && !product.actuator_type) missingBodyFields.push('Actuator Type');
+            if (product.has_actuator && !product.actuator_series) missingBodyFields.push('Actuator Series');
+            if (product.has_actuator && !product.actuator_model_id) missingBodyFields.push('Actuator Model');
+            if (product.has_actuator && !product.actuator_standard_special) missingBodyFields.push('Actuator Standard/Special');
+            if (product.has_handwheel && !product.handwheel_type) missingBodyFields.push('Handwheel Type');
+            if (product.has_handwheel && !product.handwheel_series) missingBodyFields.push('Handwheel Series');
+            if (product.has_handwheel && !product.handwheel_model_id) missingBodyFields.push('Handwheel Model');
+            if (product.has_handwheel && !product.handwheel_standard_special) missingBodyFields.push('Handwheel Standard/Special');
+            const canCalculate = missingBodyFields.length === 0;
+            return (
+            <Card>
+              <CardContent className="pt-4">
+                {/* Incomplete field warning — shown before calculating */}
+                {!canCalculate && (
+                  <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3">
+                    <p className="text-xs font-bold text-amber-700 dark:text-amber-400 mb-1.5 flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5" /> Fill required fields before calculating price:
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {missingBodyFields.map(f => (
+                        <span key={f} className="text-[10px] bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border border-amber-300 rounded px-1.5 py-0.5">{f}</span>
+                      ))}
+                    </div>
                   </div>
                 )}
-              </div>
-              {/* Pricing error warnings */}
-              {product.has_pricing_errors && product.pricing_warnings.length > 0 && (
-                <div className="mt-3 rounded-lg border-2 border-red-300 bg-red-50 dark:bg-red-950/20 p-3 space-y-1">
-                  <div className="flex items-center gap-2 text-red-700 dark:text-red-400">
-                    <AlertTriangle className="w-4 h-4" />
-                    <p className="text-xs font-bold uppercase">Pricing Data Missing — Cannot Save</p>
+                <div className="flex items-end gap-3 flex-wrap">
+                  <div className="space-y-1.5 w-32">
+                    <Label className="text-xs font-semibold">Discount %</Label>
+                    <Input className="h-9" type="number" min="0" max="100" value={product.discount_pct || ''} onChange={(e) => store.updateProduct(product.id, { discount_pct: e.target.value === '' ? 0 : Number(e.target.value) })} />
                   </div>
-                  <ul className="text-xs text-red-600 dark:text-red-400 space-y-0.5 list-disc list-inside">
-                    {product.pricing_warnings.map((w, wi) => <li key={wi}>{w}</li>)}
-                  </ul>
-                  <p className="text-xs font-medium text-red-700 dark:text-red-400 mt-1">
-                    ⚠️ Please contact the administrator to add the missing pricing data.
-                  </p>
+                  <Button
+                    size="sm"
+                    variant={canCalculate ? 'outline' : 'secondary'}
+                    className="gap-1.5"
+                    onClick={() => lookupCosts(product.id)}
+                    disabled={calculatingId === product.id || !canCalculate}
+                    title={!canCalculate ? `Fill required fields: ${missingBodyFields.join(', ')}` : 'Calculate price'}
+                  >
+                    {calculatingId === product.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Calculator className="w-3.5 h-3.5" />}
+                    {calculatingId === product.id ? 'Calculating...' : 'Calculate Price'}
+                  </Button>
+                  {product.unit_price > 0 && !product.has_pricing_errors && (
+                    <div className="ml-auto text-right">
+                      <p className="text-xs text-muted-foreground">Unit Price</p>
+                      <p className="text-lg font-bold">{fmt(product.unit_price)}</p>
+                      {isIntl && <p className="text-xs text-muted-foreground">(₹{product.unit_price.toLocaleString('en-IN')} INR)</p>}
+                      <p className="text-xs text-muted-foreground">Line Total: {fmtLine(product.unit_price, product.quantity)}</p>
+                      {isIntl && <p className="text-[10px] text-muted-foreground">(₹{product.line_total.toLocaleString('en-IN')} INR)</p>}
+                    </div>
+                  )}
                 </div>
-              )}
-              {/* Non-critical warnings */}
-              {!product.has_pricing_errors && product.pricing_warnings.length > 0 && (
-                <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3">
-                  <p className="text-xs font-bold text-amber-700 dark:text-amber-400 mb-1">⚠ {product.pricing_warnings.length} data gap(s) — ₹0 used for missing items</p>
-                  <ul className="text-xs text-amber-600 dark:text-amber-400 space-y-0.5 list-disc list-inside">
-                    {product.pricing_warnings.map((w, wi) => <li key={wi}>{w}</li>)}
-                  </ul>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                {/* Pricing error warnings — shown after calculating */}
+                {product.has_pricing_errors && product.pricing_warnings.length > 0 && (
+                  <div className="mt-3 rounded-lg border-2 border-red-300 bg-red-50 dark:bg-red-950/20 p-3 space-y-1">
+                    <div className="flex items-center gap-2 text-red-700 dark:text-red-400">
+                      <AlertTriangle className="w-4 h-4" />
+                      <p className="text-xs font-bold uppercase">Pricing Data Missing — Cannot Save</p>
+                    </div>
+                    <ul className="text-xs text-red-600 dark:text-red-400 space-y-0.5 list-disc list-inside">
+                      {product.pricing_warnings.map((w, wi) => <li key={wi}>{w}</li>)}
+                    </ul>
+                    <p className="text-xs font-medium text-red-700 dark:text-red-400 mt-1">
+                      Please contact the administrator to add the missing pricing data.
+                    </p>
+                  </div>
+                )}
+                {/* Non-critical backend warnings — shown after calculating */}
+                {!product.has_pricing_errors && product.pricing_warnings.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3">
+                    <p className="text-xs font-bold text-amber-700 dark:text-amber-400 mb-1">⚠ {product.pricing_warnings.length} data gap(s) — ₹0 used for missing items</p>
+                    <ul className="text-xs text-amber-600 dark:text-amber-400 space-y-0.5 list-disc list-inside">
+                      {product.pricing_warnings.map((w, wi) => <li key={wi}>{w}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            );
+          })()}
 
           {idx < store.products.length - 1 && <Separator className="my-6" />}
         </div>
@@ -1731,6 +1824,11 @@ function StepLineItemsPricing({
     isIntl
       ? `$${Math.round(v / (exchangeRate || 83.5)).toLocaleString('en-US')}`
       : `\u20b9${v.toLocaleString('en-IN')}`;
+
+  const fmtLine = (unitPriceINR: number, qty: number) =>
+    isIntl
+      ? `$${lineToUSD(unitPriceINR, qty, exchangeRate || 83.5).toLocaleString('en-US')}`
+      : `\u20b9${(unitPriceINR * qty).toLocaleString('en-IN')}`;
 
   const anyUncalculated = store.products.some(p => p.unit_price <= 0);
 
@@ -1878,7 +1976,7 @@ function StepLineItemsPricing({
                     </td>
                     <td className="px-4 py-3 text-right">
                       {p.line_total > 0 && !p.has_pricing_errors ? (
-                        <span className="font-bold text-xs">{fmt(p.line_total)}</span>
+                        <span className="font-bold text-xs">{fmtLine(p.unit_price, p.quantity)}</span>
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
@@ -1899,7 +1997,7 @@ function StepLineItemsPricing({
         <div className="rounded-lg border bg-muted/20 px-6 py-3 space-y-1 text-sm min-w-[220px]">
           <div className="flex justify-between gap-8">
             <span className="text-muted-foreground">Products Subtotal</span>
-            <span className="font-bold">{fmt(store.products.reduce((s, p) => s + p.line_total, 0))}</span>
+            <span className="font-bold">{isIntl ? `$${store.products.reduce((s, p) => s + lineToUSD(p.unit_price, p.quantity, exchangeRate || 83.5), 0).toLocaleString('en-US')}` : `₹${store.products.reduce((s, p) => s + p.line_total, 0).toLocaleString('en-IN')}`}</span>
           </div>
           {isDealer && store.agent_commission_pct > 0 && (
             <p className="text-[10px] text-violet-600 dark:text-violet-400">
@@ -1994,7 +2092,7 @@ function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Cu
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-semibold">{fmt(p.unit_price)}</p>
-                  <p className="text-xs text-muted-foreground">Line: {fmt(p.line_total)}</p>
+                  <p className="text-xs text-muted-foreground">Line: {isIntl ? `$${lineToUSD(p.unit_price, p.quantity, exchangeRate).toLocaleString('en-US')}` : `₹${p.line_total.toLocaleString('en-IN')}`}</p>
                 </div>
               </div>
             ))}
