@@ -6,18 +6,16 @@ import { useQuoteStore } from '@/stores/quoteStore';
 import { useRouter } from 'next/navigation';
 import { use } from 'react';
 import { toast } from 'sonner';
-import { Loader2, AlertTriangle, RefreshCcw, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Loader2 } from 'lucide-react';
 
 /**
  * Edit Quote Page
- * 
+ *
  * Loads an existing quote into the Zustand store (via loadForEdit),
  * then redirects to /employee/new-quote where the wizard will
- * operate in edit mode.
- *
- * Before redirecting, it checks the exchange rate and shows a
- * warning popup if it has changed since the quote was created.
+ * operate in edit mode. The quote's saved exchange_rate_snapshot is
+ * the authoritative dollar rate; it can be changed in the wizard's
+ * Terms & Conditions step.
  */
 export default function EditQuotePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -25,9 +23,6 @@ export default function EditQuotePage({ params }: { params: Promise<{ id: string
   const router = useRouter();
   const store = useQuoteStore();
   const [loading, setLoading] = useState(true);
-  const [showRateDialog, setShowRateDialog] = useState(false);
-  const [oldRate, setOldRate] = useState(0);
-  const [newRate, setNewRate] = useState(0);
 
   const loadQuoteForEdit = useCallback(async () => {
     setLoading(true);
@@ -80,16 +75,6 @@ export default function EditQuotePage({ params }: { params: Promise<{ id: string
         accessories: (accessoriesRes.data ?? []).filter(a => a.quote_product_id === p.id),
       }));
 
-      // Get current exchange rate: prefer live API, fallback to DB setting
-      const [rateData, liveRateRes] = await Promise.all([
-        supabase.from('global_settings').select('value').eq('key', 'exchange_rate').single(),
-        fetch('https://api.frankfurter.dev/v2/rate/USD/INR').then(r => r.json()).catch(() => null),
-      ]);
-      const dbRate = (rateData?.data?.value as { usd_to_inr: number })?.usd_to_inr ?? null;
-      const liveRate = typeof liveRateRes?.rate === 'number' ? liveRateRes.rate : null;
-      const currentRate = liveRate ?? dbRate ?? 0;
-      const snapshotRate = quote.exchange_rate_snapshot ? Number(quote.exchange_rate_snapshot) : null;
-
       // Load margins based on pricing mode
       const marginsKey = quote.pricing_mode === 'project' ? 'project_margins' : 'standard_margins';
       const { data: marginData } = await supabase
@@ -107,16 +92,6 @@ export default function EditQuotePage({ params }: { params: Promise<{ id: string
         store.setMargins(margins);
       }
 
-      // Check exchange rate change
-      if (snapshotRate && currentRate > 0 && Math.abs(snapshotRate - currentRate) > 0.01) {
-        setOldRate(snapshotRate);
-        setNewRate(currentRate);
-        setShowRateDialog(true);
-        setLoading(false);
-        return; // Don't redirect yet — wait for user choice
-      }
-
-      // No rate change — redirect to wizard
       setLoading(false);
       router.push('/employee/new-quote');
     } catch (err) {
@@ -130,72 +105,11 @@ export default function EditQuotePage({ params }: { params: Promise<{ id: string
     loadQuoteForEdit();
   }, [loadQuoteForEdit]);
 
-  function handleUseNewRate() {
-    // Store new rate
-    store.setQuoteSettings({ exchange_rate_snapshot: newRate } as any);
-    setShowRateDialog(false);
-    router.push('/employee/new-quote');
-  }
-
-  function handleKeepOldRate() {
-    // Keep old rate — store snapshot stays
-    setShowRateDialog(false);
-    router.push('/employee/new-quote');
-  }
-
-  if (loading && !showRateDialog) {
+  if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-3">
         <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
         <p className="text-sm text-muted-foreground">Loading quote for editing...</p>
-      </div>
-    );
-  }
-
-  // Exchange rate change dialog
-  if (showRateDialog) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <div className="max-w-md w-full mx-auto space-y-6">
-          <div className="rounded-xl border-2 border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-6 space-y-4">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-6 h-6 text-amber-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <h2 className="text-lg font-bold text-amber-800 dark:text-amber-300">Exchange Rate Changed</h2>
-                <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
-                  The USD to INR exchange rate has changed since this quote was created.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="rounded-lg bg-white dark:bg-gray-900 p-3 border">
-                <p className="text-xs text-muted-foreground mb-1">Saved Rate</p>
-                <p className="text-xl font-bold text-red-600">₹{oldRate}</p>
-                <p className="text-[10px] text-muted-foreground">1 USD = ₹{oldRate}</p>
-              </div>
-              <div className="rounded-lg bg-white dark:bg-gray-900 p-3 border border-emerald-300">
-                <p className="text-xs text-muted-foreground mb-1">Live Rate</p>
-                <p className="text-xl font-bold text-emerald-600">₹{newRate}</p>
-                <p className="text-[10px] text-muted-foreground">1 USD = ₹{newRate}</p>
-              </div>
-            </div>
-
-            <p className="text-xs text-amber-700 dark:text-amber-400">
-              <strong>We recommend using the latest rate</strong> for accurate pricing. 
-              If you keep the old rate, the quote will continue using ₹{oldRate}.
-            </p>
-
-            <div className="flex gap-3 pt-2">
-              <Button onClick={handleUseNewRate} className="flex-1 gap-2">
-                <RefreshCcw className="w-4 h-4" /> Use New Rate (₹{newRate})
-              </Button>
-              <Button variant="outline" onClick={handleKeepOldRate} className="flex-1 gap-2">
-                <X className="w-4 h-4" /> Keep Old Rate (₹{oldRate})
-              </Button>
-            </div>
-          </div>
-        </div>
       </div>
     );
   }

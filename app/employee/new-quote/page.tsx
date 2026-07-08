@@ -14,7 +14,7 @@ import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import {
   ChevronLeft, ChevronRight, Plus, Trash2, Copy, Save, Loader2,
-  Settings2, Package, Calculator, CheckCircle, FileText, AlertTriangle, RefreshCw
+  Settings2, Package, Calculator, CheckCircle, FileText, AlertTriangle
 } from 'lucide-react';
 import { calculateProductPrice, calculateQuoteTotal, roundToNearest10, convertToUSD, lineToUSD } from '@/lib/pricingEngine';
 import type { Customer } from '@/types';
@@ -69,7 +69,7 @@ export default function NewQuotePage() {
 
   async function loadInitialData() {
     setLoadingData(true);
-    const [custRes, seriesRes, matRes, settingsRes, bwRes, bnwRes, actRes, hwRes, testPresRes, tubePresRes, sealRes, machTypeRes, liveRateRes] = await Promise.all([
+    const [custRes, seriesRes, matRes, settingsRes, bwRes, bnwRes, actRes, hwRes, testPresRes, tubePresRes, sealRes, machTypeRes] = await Promise.all([
       supabase.from('customers').select('*').order('name'),
       supabase.from('series').select('*').eq('is_active', true).order('series_number'),
       supabase.from('materials').select('*').eq('is_active', true),
@@ -82,7 +82,6 @@ export default function NewQuotePage() {
       supabase.from('tubing_presets').select('*').eq('is_active', true),
       supabase.from('seal_ring_prices').select('series_id, seal_type, size, rating').eq('is_active', true),
       supabase.from('machining_prices').select('component, series_id, type_key, size, rating').eq('is_active', true),
-      fetch('https://api.frankfurter.dev/v2/rate/USD/INR').then(r => r.json()).catch(() => null),
     ]);
 
     setCustomers(custRes.data ?? []);
@@ -115,14 +114,13 @@ export default function NewQuotePage() {
       store.setMargins(v);
     }
 
-    // Load exchange rate: edit mode uses saved snapshot, new quote uses live API rate, DB value as fallback
+    // Load exchange rate: edit mode uses saved snapshot, new quote uses admin default from DB
     const exSetting = settings.find(s => s.key === 'exchange_rate');
     const dbRate = (exSetting?.value as { usd_to_inr: number } | undefined)?.usd_to_inr ?? 83.5;
-    const liveRate = typeof liveRateRes?.rate === 'number' ? liveRateRes.rate : null;
     if (store.edit_mode && store.exchange_rate_snapshot) {
       setExchangeRate(store.exchange_rate_snapshot);
     } else {
-      setExchangeRate(liveRate ?? dbRate);
+      setExchangeRate(dbRate);
     }
 
     setLoadingData(false);
@@ -331,6 +329,7 @@ export default function NewQuotePage() {
         handwheel_cost: hwCost,
         unit_price: result.unitPrice,
         line_total: result.lineTotal,
+        price_stale: false,
       });
 
       // ---- Check for critical errors (zero costs that shouldn't be zero) ----
@@ -401,12 +400,18 @@ export default function NewQuotePage() {
       toast.error(`${errorProducts.length} product(s) have pricing data errors. Please fix them or contact the administrator.`);
       return;
     }
+    const staleProducts = store.products.filter(p => p.price_stale || p.unit_price <= 0);
+    if (staleProducts.length > 0) {
+      toast.error(`${staleProducts.length} product(s) have outdated or missing prices. Please recalculate before saving.`);
+      return;
+    }
     if (store.packing_price <= 0) { toast.error('Packing price is required and must be > 0'); return; }
     if (!store.delivery_text.trim()) { toast.error('Delivery timeline is required'); return; }
     if (store.pricing_type === 'for-site' && store.freight_price <= 0) { toast.error('Freight price is required for F.O.R. pricing'); return; }
     if (store.pricing_type === 'custom' && !store.custom_pricing_title.trim()) { toast.error('Custom pricing title is required'); return; }
     const paymentTotal = store.payment_advance_pct + store.payment_approval_pct + store.payment_despatch_pct;
     if (paymentTotal !== 100) { toast.error('Payment terms must total exactly 100%'); return; }
+    if (exchangeRate <= 0) { toast.error('Dollar rate is required and must be > 0'); return; }
 
     setSaving(true);
     try {
@@ -604,6 +609,7 @@ export default function NewQuotePage() {
         if (p.has_actuator && !p.actuator_model_id) { toast.error(`${label}: Please complete all Actuator selections`); return false; }
         if (p.has_handwheel && !p.handwheel_model_id) { toast.error(`${label}: Please complete all Handwheel selections`); return false; }
         if (p.unit_price <= 0) { toast.error(`${label}: Please click "Calculate Price" before proceeding`); return false; }
+        if (p.price_stale) { toast.error(`${label}: Values changed since the last calculation — click "Calculate Price" to update the price`); return false; }
         if (p.has_pricing_errors) { toast.error(`${label}: Has pricing data errors. Please fix or contact administrator.`); return false; }
       }
       return true;
@@ -615,6 +621,7 @@ export default function NewQuotePage() {
         const p = store.products[i];
         const label = `Product ${i + 1}${p.tag_number ? ` (${p.tag_number})` : ''}`;
         if (p.unit_price <= 0) { toast.error(`${label}: Price not calculated yet — click Recalculate`); return false; }
+        if (p.price_stale) { toast.error(`${label}: Values changed — click "Recalculate All" to update prices`); return false; }
         if (p.has_pricing_errors) { toast.error(`${label}: Has pricing errors — contact administrator`); return false; }
         if (p.discount_pct < 0 || p.discount_pct > 100) { toast.error(`${label}: Discount must be between 0 and 100%`); return false; }
       }
@@ -626,6 +633,7 @@ export default function NewQuotePage() {
     }
     // Step 3: Terms & Conditions
     if (step === 3) {
+      if (exchangeRate <= 0) { toast.error('Dollar rate is required and must be > 0'); return false; }
       if (store.packing_price <= 0) { toast.error('Packing price is required and must be > 0'); return false; }
       if (!store.delivery_text.trim()) { toast.error('Delivery timeline is required (e.g. "4-6 working weeks")'); return false; }
       if (store.pricing_type === 'for-site' && store.freight_price <= 0) { toast.error('Freight price is required for F.O.R. pricing'); return false; }
@@ -688,7 +696,7 @@ export default function NewQuotePage() {
 
       {/* Step Content */}
       {store.currentStep === 0 && (
-        <StepCustomerProject customers={customers} exchangeRate={exchangeRate} onRateChange={setExchangeRate} />
+        <StepCustomerProject customers={customers} />
       )}
       {store.currentStep === 1 && (
         <StepProducts series={series} materials={materials} lookupCosts={lookupCosts} customers={customers} exchangeRate={exchangeRate} bodyWeights={bodyWeights} bonnetWeights={bonnetWeights} actuatorModels={actuatorModels} handwheelPrices={handwheelPrices} calculatingId={calculatingId} testingPresets={testingPresets} tubingPresets={tubingPresets} sealRingRows={sealRingRows} machiningTypeRows={machiningTypeRows} />
@@ -697,7 +705,7 @@ export default function NewQuotePage() {
         <StepLineItemsPricing customers={customers} lookupCosts={lookupCosts} calculatingId={calculatingId} exchangeRate={exchangeRate} />
       )}
       {store.currentStep === 3 && (
-        <StepTermsPricing customers={customers} exchangeRate={exchangeRate} />
+        <StepTermsPricing customers={customers} exchangeRate={exchangeRate} onRateChange={setExchangeRate} />
       )}
       {store.currentStep === 4 && (
         <StepReview customers={customers} saving={saving} onSave={handleSave} exchangeRate={exchangeRate} />
@@ -735,22 +743,9 @@ export default function NewQuotePage() {
 // STEP 1: Customer & Project
 // ===================================================================
 
-function StepCustomerProject({ customers, exchangeRate, onRateChange }: { customers: Customer[]; exchangeRate: number; onRateChange: (rate: number) => void }) {
+function StepCustomerProject({ customers }: { customers: Customer[] }) {
   const store = useQuoteStore();
   const selectedCustomer = customers.find(c => c.id === store.customer_id);
-  const [loadingRate, setLoadingRate] = useState(false);
-
-  async function refreshRate() {
-    setLoadingRate(true);
-    try {
-      const data = await fetch('https://api.frankfurter.dev/v2/rate/USD/INR').then(r => r.json());
-      if (typeof data?.rate === 'number') onRateChange(data.rate);
-    } catch {
-      toast.error('Failed to fetch live rate');
-    } finally {
-      setLoadingRate(false);
-    }
-  }
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -816,23 +811,6 @@ function StepCustomerProject({ customers, exchangeRate, onRateChange }: { custom
             </Select>
             <p className="text-xs text-muted-foreground">Standard uses default margins, Project uses project-specific margins.</p>
           </div>
-          <div className="space-y-2">
-            <Label>Set Dollar Price <span className="text-muted-foreground text-xs">(1 USD = ₹)</span></Label>
-            <div className="flex gap-2">
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={exchangeRate || ''}
-                onChange={(e) => onRateChange(e.target.value === '' ? 0 : Number(e.target.value))}
-                placeholder="e.g. 83.5"
-              />
-              <Button type="button" variant="outline" size="icon" onClick={refreshRate} disabled={loadingRate} title="Fetch live rate">
-                {loadingRate ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">Auto-fetched from live rates. You can override — this rate will be used for all USD conversions in this quote.</p>
-          </div>
         </CardContent>
       </Card>
     </div>
@@ -843,7 +821,7 @@ function StepCustomerProject({ customers, exchangeRate, onRateChange }: { custom
 // STEP 3: Terms & Pricing
 // ===================================================================
 
-function StepTermsPricing({ customers, exchangeRate }: { customers: Customer[]; exchangeRate: number }) {
+function StepTermsPricing({ customers, exchangeRate, onRateChange }: { customers: Customer[]; exchangeRate: number; onRateChange: (rate: number) => void }) {
   const store = useQuoteStore();
   const selectedCustomer = customers.find(c => c.id === store.customer_id);
   const isDealer = selectedCustomer?.customer_type === 'dealer';
@@ -857,6 +835,18 @@ function StepTermsPricing({ customers, exchangeRate }: { customers: Customer[]; 
         <Card>
           <CardHeader><CardTitle className="text-base">Pricing & Charges</CardTitle></CardHeader>
           <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>Dollar Rate <span className="text-muted-foreground text-xs">(1 USD = ₹) *</span></Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={exchangeRate || ''}
+                onChange={(e) => onRateChange(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
+                placeholder="e.g. 83.5"
+              />
+              <p className="text-xs text-muted-foreground">This rate is used for all USD conversions in this quote.</p>
+            </div>
             <div className="space-y-2">
               <Label>Pricing Type</Label>
               <Select value={store.pricing_type} onValueChange={(v) => store.setQuoteSettings({ pricing_type: (v ?? 'ex-works') as 'ex-works' | 'for-site' | 'custom' })}>
@@ -909,16 +899,20 @@ function StepTermsPricing({ customers, exchangeRate }: { customers: Customer[]; 
                   <Input
                     type="number" min="0"
                     className="pl-6"
+                    disabled={isIntl && exchangeRate <= 0}
                     value={isIntl
-                      ? (store.packing_price > 0 ? Math.round(store.packing_price / (exchangeRate || 83.5)) : '')
+                      ? (store.packing_price > 0 && exchangeRate > 0 ? Math.round(store.packing_price / exchangeRate) : '')
                       : (store.packing_price || '')}
                     onChange={(e) => {
                       const raw = e.target.value === '' ? 0 : Number(e.target.value);
-                      store.setQuoteSettings({ packing_price: isIntl ? Math.round(raw * (exchangeRate || 83.5)) : raw });
+                      store.setQuoteSettings({ packing_price: isIntl ? Math.round(raw * exchangeRate) : raw });
                     }}
                   />
                 </div>
-                {isIntl && store.packing_price > 0 && (
+                {isIntl && exchangeRate <= 0 && (
+                  <p className="text-[10px] text-destructive">Set the dollar rate above first.</p>
+                )}
+                {isIntl && exchangeRate > 0 && store.packing_price > 0 && (
                   <p className="text-[10px] text-muted-foreground">= ₹{store.packing_price.toLocaleString('en-IN')} INR</p>
                 )}
               </div>
@@ -1719,6 +1713,11 @@ function StepProducts({
                       {isIntl && <p className="text-xs text-muted-foreground">(₹{product.unit_price.toLocaleString('en-IN')} INR)</p>}
                       <p className="text-xs text-muted-foreground">Line Total: {fmtLine(product.unit_price, product.quantity)}</p>
                       {isIntl && <p className="text-[10px] text-muted-foreground">(₹{product.line_total.toLocaleString('en-IN')} INR)</p>}
+                      {product.price_stale && (
+                        <p className="text-[10px] font-semibold text-amber-600 flex items-center gap-1 justify-end mt-1">
+                          <AlertTriangle className="w-3 h-3" /> Values changed — recalculate
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1830,7 +1829,7 @@ function StepLineItemsPricing({
       ? `$${lineToUSD(unitPriceINR, qty, exchangeRate || 83.5).toLocaleString('en-US')}`
       : `\u20b9${(unitPriceINR * qty).toLocaleString('en-IN')}`;
 
-  const anyUncalculated = store.products.some(p => p.unit_price <= 0);
+  const anyUncalculated = store.products.some(p => p.unit_price <= 0 || p.price_stale);
 
   return (
     <div className="space-y-6">
@@ -1866,7 +1865,7 @@ function StepLineItemsPricing({
         <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
           <p className="text-xs text-amber-700 dark:text-amber-400">
-            Some products have not been priced yet. Click <strong>Recalculate</strong> on each row to generate prices.
+            Some products have not been priced or have outdated prices. Click <strong>Recalculate All</strong> to update them.
           </p>
         </div>
       )}
