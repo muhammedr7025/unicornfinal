@@ -61,6 +61,8 @@ export interface ProductConfig {
   // Pricing validation
   pricing_warnings: string[];
   has_pricing_errors: boolean;
+  // True when a price-affecting value changed after the last calculation
+  price_stale: boolean;
 }
 
 const emptyProduct = (): ProductConfig => ({
@@ -117,6 +119,7 @@ const emptyProduct = (): ProductConfig => ({
   line_total: 0,
   pricing_warnings: [],
   has_pricing_errors: false,
+  price_stale: false,
 });
 
 interface QuoteState {
@@ -207,19 +210,52 @@ const initialState = {
   exchange_rate_snapshot: null as number | null,
 };
 
+// Product keys that feed the price calculation — changing any of these
+// after a calculation makes the stored price stale.
+const PRICE_AFFECTING_PRODUCT_KEYS: ReadonlyArray<keyof ProductConfig> = [
+  'quantity', 'series_id', 'size', 'rating', 'end_connect_type', 'bonnet_type', 'trim_type',
+  'body_bonnet_material_id', 'plug_material_id', 'seat_material_id', 'stem_material_id',
+  'cage_material_id', 'cage_quantity', 'seal_ring_type', 'has_pilot_plug',
+  'has_actuator', 'actuator_type', 'actuator_series', 'actuator_model_id', 'actuator_standard_special',
+  'has_handwheel', 'handwheel_type', 'handwheel_series', 'handwheel_model_id', 'handwheel_standard_special',
+  'tubing_items', 'testing_items', 'accessories', 'discount_pct',
+];
+
+// Quote-level keys that feed every product's price calculation.
+const PRICE_AFFECTING_QUOTE_KEYS = ['agent_commission_pct', 'pricing_mode'] as const;
+
 export const useQuoteStore = create<QuoteState>((set) => ({
   ...initialState,
 
   setCurrentStep: (step) => set({ currentStep: step }),
 
-  setQuoteSettings: (settings) => set((state) => ({ ...state, ...settings })),
+  setQuoteSettings: (settings) => set((state) => {
+    const priceChanged = PRICE_AFFECTING_QUOTE_KEYS.some(
+      (k) => k in settings && settings[k] !== state[k]
+    );
+    return {
+      ...state,
+      ...settings,
+      ...(priceChanged
+        ? { products: state.products.map(p => ({ ...p, price_stale: true })) }
+        : {}),
+    };
+  }),
 
   addProduct: () => set((state) => ({
     products: [...state.products, emptyProduct()],
   })),
 
   updateProduct: (id, updates) => set((state) => ({
-    products: state.products.map(p => p.id === id ? { ...p, ...updates } : p),
+    products: state.products.map(p => {
+      if (p.id !== id) return p;
+      const changed = PRICE_AFFECTING_PRODUCT_KEYS.some(
+        (k) => k in updates && updates[k] !== p[k]
+      );
+      // Explicit price_stale in updates (the calculator clearing the flag)
+      // wins over detection; detection only ever sets it to true.
+      return { ...p, ...updates, ...(changed ? { price_stale: true } : {}) };
+    }),
   })),
 
   removeProduct: (id) => set((state) => ({
@@ -329,6 +365,7 @@ export const useQuoteStore = create<QuoteState>((set) => ({
       line_total: Number(p.line_total_inr ?? 0),
       pricing_warnings: [],
       has_pricing_errors: false,
+      price_stale: false,
     })),
   }),
 
