@@ -189,7 +189,10 @@ export function calculateQuoteTotal(
   subtotal += packingPrice ?? 0;
 
   const taxRate = isInternational ? 0 : 0.18; // 18% GST for India, 0% international
-  const taxAmount = subtotal * taxRate;
+  // Round GST to whole rupees so stored totals never carry paise. Keeps the
+  // Review screen, detail view and PDF (which all read these stored values)
+  // showing the same, decimal-free number.
+  const taxAmount = Math.round(subtotal * taxRate);
   const grandTotal = subtotal + taxAmount;
 
   return { productSubtotal, subtotal, taxAmount, grandTotal };
@@ -199,19 +202,22 @@ export function calculateQuoteTotal(
  * Convert INR to USD for display and PDF only.
  * Calculation always happens in INR.
  *
- * Uses Math.round (not floor or ceil) for currency display.
+ * Rounds UP to the next whole dollar (ceiling) so the quoted USD price never
+ * undercharges relative to the INR price, mirroring the ₹10 ceiling used for
+ * INR. Whole dollars only — no cents — so every screen and the PDF agree.
  */
 export function convertToUSD(amountINR: number, exchangeRate: number): number {
   if (exchangeRate <= 0) return 0;
-  return Math.round(amountINR / exchangeRate);
+  return Math.ceil(amountINR / exchangeRate);
 }
 
 /**
- * Convert a line total to USD by rounding the unit price first, then multiplying by quantity.
- * This avoids the rounding inconsistency where round(unit) × qty ≠ round(unit × qty).
- * Example: unit=₹8320, qty=2, rate=83.5 → round(99.64)×2 = $200 (not round(199.28) = $199).
+ * Convert a line total to USD by rounding the unit price UP first, then
+ * multiplying by quantity. This keeps line = unit × qty consistent (round(unit)
+ * × qty, never round(unit × qty)) and matches convertToUSD's ceiling rule.
+ * Example: unit=₹8320, qty=2, rate=83.5 → ceil(99.64)×2 = $200.
  */
 export function lineToUSD(unitPriceINR: number, quantity: number, exchangeRate: number): number {
   if (exchangeRate <= 0) return 0;
-  return Math.round(unitPriceINR / exchangeRate) * quantity;
+  return Math.ceil(unitPriceINR / exchangeRate) * quantity;
 }

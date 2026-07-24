@@ -20,7 +20,9 @@ Font.register({
 
 const LOGO_DATA: string = (() => {
   try {
-    const p = path.join(process.cwd(), 'public', 'unicorn-logo.png');
+    // Flattened (white-background) logo — the transparent PNG renders with a
+    // grey box behind it in @react-pdf/renderer.
+    const p = path.join(process.cwd(), 'public', 'unicorn-logo-print.png');
     return `data:image/png;base64,${fs.readFileSync(p).toString('base64')}`;
   } catch {
     return '';
