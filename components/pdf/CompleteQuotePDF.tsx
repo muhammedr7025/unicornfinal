@@ -111,6 +111,18 @@ const s = StyleSheet.create({
   footerBasicName: { fontSize: 8, fontWeight: 700, color: c.black },
   footerBasicLine: { fontSize: 7.5, color: c.black, lineHeight: 1.35 },
 
+  /* Page number for the cover / summary pages — sits below the address block
+     so adding it cannot push the footer up into the page content. */
+  pageNumBottom: {
+    position: 'absolute',
+    bottom: 11,
+    left: 40,
+    right: 40,
+    textAlign: 'center',
+    fontSize: 7.5,
+    color: c.gray,
+  },
+
   /* ── Branded summary header ── */
   summaryHeader: {
     position: 'absolute',
@@ -287,6 +299,19 @@ function FooterBasic() {
       <Text style={s.footerBasicLine}>SF No : 100/2B, Valukkuparai P.O., Marichettipathy Road, Nachipalayam,</Text>
       <Text style={s.footerBasicLine}>Madukkarai Taluk, Coimbatore – 641032, Tamil Nadu, India, Ph No. +91-422-2901322</Text>
     </View>
+  );
+}
+
+/* ── Live page number ──
+   Rendered per page by @react-pdf so it always reflects the real position in
+   the document. Hardcoding it broke as soon as the item table overflowed. */
+function PageNumber() {
+  return (
+    <Text
+      style={s.pageNumBottom}
+      fixed
+      render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`}
+    />
   );
 }
 
@@ -482,6 +507,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
           {creator.email && <Text style={s.clSigText}>Email: {creator.email}</Text>}
 
           <FooterBasic />
+          <PageNumber />
         </Page>
       </>)}
 
@@ -653,6 +679,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
         {signaturePart}
 
         <FooterBasic />
+        <PageNumber />
       </Page>
 
       {/* ════════════ PAGES 3-6 — T&C (only in complete mode) ════════════ */}
@@ -710,7 +737,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
           </View>
 
           <View style={s.tcPageRow} fixed>
-            <Text style={s.tcPageNum}>1</Text>
+            <Text style={s.tcPageNum} fixed render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
             <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
           </View>
           <FooterTC />
@@ -770,7 +797,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
           </View>
 
           <View style={s.tcPageRow} fixed>
-            <Text style={s.tcPageNum}>2</Text>
+            <Text style={s.tcPageNum} fixed render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
             <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
           </View>
           <FooterTC />
@@ -814,7 +841,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
           </View>
 
           <View style={s.tcPageRow} fixed>
-            <Text style={s.tcPageNum}>3</Text>
+            <Text style={s.tcPageNum} fixed render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
             <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
           </View>
           <FooterTC />
@@ -859,7 +886,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
           </View>
 
           <View style={s.tcPageRow} fixed>
-            <Text style={s.tcPageNum}>4</Text>
+            <Text style={s.tcPageNum} fixed render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
             <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
           </View>
           <FooterTC />
