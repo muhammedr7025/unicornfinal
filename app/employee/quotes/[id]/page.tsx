@@ -131,14 +131,16 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
 
   const customer = quote.customer as { name: string; company?: string; country: string; is_international: boolean };
   const isIntl = customer.is_international;
-  const fmtINR = (v: number) => `₹${v.toLocaleString('en-IN')}`;
-  const toUSD = (v: number) => exchangeRate > 0 ? v / exchangeRate : 0;
-  const fmtUSD = (v: number) => `$${toUSD(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const fmtUSDRaw = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // Currency: INR whole rupees, USD rounded UP to whole dollars (matches the
+  // wizard and the PDF via the canonical pricing-engine helpers).
+  const fmtINR = (v: number) => `₹${Math.round(v).toLocaleString('en-IN')}`;
+  const toUSD = (v: number) => convertToUSD(v, exchangeRate);
+  const fmtUSD = (v: number) => `$${convertToUSD(v, exchangeRate).toLocaleString('en-US')}`;
+  const fmtUSDRaw = (v: number) => `$${Math.ceil(v).toLocaleString('en-US')}`;
   const fmt = (v: number) => isIntl ? fmtUSD(v) : fmtINR(v);
 
   const productSubtotal = products.reduce((s, p) => s + Number(p.line_total_inr ?? 0), 0);
-  const productSubtotalUSD = products.reduce((s, p) => s + toUSD(Number(p.unit_price_inr ?? 0)) * p.quantity, 0);
+  const productSubtotalUSD = products.reduce((s, p) => s + lineToUSD(Number(p.unit_price_inr ?? 0), p.quantity, exchangeRate), 0);
   const packingPrice = Number(quote.packing_price ?? 0);
   const freightPrice = Number(quote.freight_price ?? 0);
   const customPricingPrice = Number(quote.custom_pricing_price ?? 0);
@@ -344,7 +346,7 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
                         {isIntl && <TableCell className="text-right text-blue-600 dark:text-blue-400 font-semibold">{fmtUSD(unitINR)}</TableCell>}
                         <TableCell className="text-right font-semibold">{fmtINR(unitINR)}</TableCell>
                         <TableCell className="text-center">{p.quantity}</TableCell>
-                        {isIntl && <TableCell className="text-right text-blue-600 dark:text-blue-400 font-semibold">{fmtUSDRaw(toUSD(unitINR) * p.quantity)}</TableCell>}
+                        {isIntl && <TableCell className="text-right text-blue-600 dark:text-blue-400 font-semibold">{fmtUSDRaw(lineToUSD(unitINR, p.quantity, exchangeRate))}</TableCell>}
                         <TableCell className="text-right font-semibold">{fmtINR(totalINR)}</TableCell>
                       </TableRow>
                     );

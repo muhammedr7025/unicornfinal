@@ -20,7 +20,9 @@ Font.register({
 
 const LOGO_DATA: string = (() => {
   try {
-    const p = path.join(process.cwd(), 'public', 'unicorn-logo.png');
+    // Flattened (white-background) logo — the transparent PNG renders with a
+    // grey box behind it in @react-pdf/renderer.
+    const p = path.join(process.cwd(), 'public', 'unicorn-logo-print.png');
     return `data:image/png;base64,${fs.readFileSync(p).toString('base64')}`;
   } catch {
     return '';
@@ -123,6 +125,17 @@ const s = StyleSheet.create({
   },
   tcPageNum: { fontSize: 8, color: colors.black },
   tcRevision: { fontSize: 7, color: colors.gray },
+
+  /* Page number for pages without the T&C revision row (cover letter) */
+  pageNumOnly: {
+    position: 'absolute',
+    bottom: 78,
+    left: 50,
+    right: 50,
+    textAlign: 'center',
+    fontSize: 8,
+    color: colors.gray,
+  },
 });
 
 /* ── Shared footer ── */
@@ -133,6 +146,19 @@ function Footer() {
       <Text style={s.footerLine}>SF No : 100/2B, Valukkuparai P.O., Marichettipathy Road, Nachipalayam,</Text>
       <Text style={s.footerLine}>Madukkarai Taluk, Coimbatore – 641032, Tamil Nadu, India, Ph No. +91-422-2901322</Text>
     </View>
+  );
+}
+
+/* ── Live page number ──
+   Rendered per page by @react-pdf so it reflects the real position in the
+   document, including when a page's content overflows onto another sheet. */
+function PageNumber() {
+  return (
+    <Text
+      style={s.pageNumOnly}
+      fixed
+      render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`}
+    />
   );
 }
 
@@ -257,6 +283,7 @@ export function CoverLetterPDF({ quote, customer, creator, company }: CoverLette
         </Text>
         {creator.phone && <Text style={s.clSignPhone}>Mobile No. : {creator.phone}</Text>}
 
+        <PageNumber />
         <Footer />
       </Page>
 
@@ -325,7 +352,7 @@ export function CoverLetterPDF({ quote, customer, creator, company }: CoverLette
 
         {/* Page number row */}
         <View style={s.tcPageRow}>
-          <Text style={s.tcPageNum}>1</Text>
+          <Text style={s.tcPageNum} fixed render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
           <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
         </View>
         <Footer />
@@ -390,7 +417,7 @@ export function CoverLetterPDF({ quote, customer, creator, company }: CoverLette
         </View>
 
         <View style={s.tcPageRow}>
-          <Text style={s.tcPageNum}>2</Text>
+          <Text style={s.tcPageNum} fixed render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
           <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
         </View>
         <Footer />
@@ -449,7 +476,7 @@ export function CoverLetterPDF({ quote, customer, creator, company }: CoverLette
         </View>
 
         <View style={s.tcPageRow}>
-          <Text style={s.tcPageNum}>3</Text>
+          <Text style={s.tcPageNum} fixed render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
           <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
         </View>
         <Footer />
@@ -499,7 +526,7 @@ export function CoverLetterPDF({ quote, customer, creator, company }: CoverLette
         </View>
 
         <View style={s.tcPageRow}>
-          <Text style={s.tcPageNum}>4</Text>
+          <Text style={s.tcPageNum} fixed render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
           <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
         </View>
         <Footer />

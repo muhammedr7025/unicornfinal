@@ -212,7 +212,7 @@ const initialState = {
 
 // Product keys that feed the price calculation — changing any of these
 // after a calculation makes the stored price stale.
-const PRICE_AFFECTING_PRODUCT_KEYS: ReadonlyArray<keyof ProductConfig> = [
+export const PRICE_AFFECTING_PRODUCT_KEYS: ReadonlyArray<keyof ProductConfig> = [
   'quantity', 'series_id', 'size', 'rating', 'end_connect_type', 'bonnet_type', 'trim_type',
   'body_bonnet_material_id', 'plug_material_id', 'seat_material_id', 'stem_material_id',
   'cage_material_id', 'cage_quantity', 'seal_ring_type', 'has_pilot_plug',

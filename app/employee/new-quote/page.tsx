@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { useQuoteStore } from '@/stores/quoteStore';
+import { useQuoteStore, PRICE_AFFECTING_PRODUCT_KEYS } from '@/stores/quoteStore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -22,6 +22,10 @@ import type { Customer } from '@/types';
 // REMOVED: const TRIM_TYPES and const SEAL_TYPES — now loaded from DB
 const VALIDITY_OPTIONS = [15, 30, 45, 50, 60, 90];
 
+// Sentinel for the "— None —" entry in optional dropdowns. The select has no
+// built-in way to return to an empty selection, so picking this maps back to ''.
+const NONE_VALUE = '__none__';
+
 type BodyWeightRow = { series_id: string; size: string; rating: string; end_connect_type: string };
 type BonnetWeightRow = { series_id: string; size: string; rating: string; bonnet_type: string };
 type ActuatorRow = { id: string; type: string; series: string; model: string; standard_special: string; fixed_price: number };
@@ -38,6 +42,27 @@ const STEPS = [
   { label: 'Terms & Conditions', icon: FileText },
   { label: 'Review & Save', icon: CheckCircle },
 ];
+
+/**
+ * Build a readable message from an unknown thrown value.
+ *
+ * Supabase rejects with a PostgrestError-shaped plain object
+ * ({ message, details, hint, code }) — NOT an Error instance — so an
+ * `err instanceof Error` check silently discards the real reason.
+ */
+function describeError(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (err && typeof err === 'object') {
+    const e = err as { message?: string; details?: string; hint?: string; code?: string };
+    const parts = [e.message, e.details, e.hint].filter(
+      (p): p is string => typeof p === 'string' && p.trim().length > 0
+    );
+    if (parts.length > 0) return e.code ? `${parts.join(' — ')} (code ${e.code})` : parts.join(' — ');
+    if (e.code) return `Database error (code ${e.code})`;
+  }
+  if (typeof err === 'string' && err.trim()) return err;
+  return 'Unknown error — see the browser console for details.';
+}
 
 export default function NewQuotePage() {
   const router = useRouter();
@@ -59,6 +84,11 @@ export default function NewQuotePage() {
   const [saving, setSaving] = useState(false);
   const [calculatingId, setCalculatingId] = useState<string | null>(null);
   const [exchangeRate, setExchangeRate] = useState(83.5);
+
+  // USD is only relevant for international customers — used to gate the rate
+  // badge, the Dollar Rate field, and the "rate required" validations.
+  const selectedCustomer = customers.find(c => c.id === store.customer_id);
+  const isIntl = selectedCustomer?.is_international ?? false;
 
   useEffect(() => {
     if (!store.edit_mode) {
@@ -316,6 +346,18 @@ export default function NewQuotePage() {
       };
       const result = calculateProductPrice(costs, params);
 
+      // The lookups above take several round-trips; inputs stay editable
+      // meanwhile. If any price-affecting value changed mid-calculation,
+      // this result is already outdated — keep the product flagged stale.
+      const freshState = useQuoteStore.getState();
+      const freshProduct = freshState.products.find(pp => pp.id === productId);
+      const editedDuringCalc = !freshProduct
+        || PRICE_AFFECTING_PRODUCT_KEYS.some(k => freshProduct[k] !== product[k])
+        || freshState.agent_commission_pct !== commPct
+        || freshState.mfg_profit_pct !== store.mfg_profit_pct
+        || freshState.bo_profit_pct !== store.bo_profit_pct
+        || freshState.neg_margin_pct !== store.neg_margin_pct;
+
       store.updateProduct(productId, {
         body_cost: bodyCost,
         bonnet_cost: bonnetCost,
@@ -329,8 +371,11 @@ export default function NewQuotePage() {
         handwheel_cost: hwCost,
         unit_price: result.unitPrice,
         line_total: result.lineTotal,
-        price_stale: false,
+        ...(editedDuringCalc ? {} : { price_stale: false }),
       });
+      if (editedDuringCalc) {
+        toast.warning('Values changed while the price was being calculated — click Calculate Price again to refresh.');
+      }
 
       // ---- Check for critical errors (zero costs that shouldn't be zero) ----
       const criticalMissing: string[] = [];
@@ -411,7 +456,7 @@ export default function NewQuotePage() {
     if (store.pricing_type === 'custom' && !store.custom_pricing_title.trim()) { toast.error('Custom pricing title is required'); return; }
     const paymentTotal = store.payment_advance_pct + store.payment_approval_pct + store.payment_despatch_pct;
     if (paymentTotal !== 100) { toast.error('Payment terms must total exactly 100%'); return; }
-    if (exchangeRate <= 0) { toast.error('Dollar rate is required and must be > 0'); return; }
+    if (isIntl && exchangeRate <= 0) { toast.error('Dollar rate is required and must be > 0'); return; }
 
     setSaving(true);
     try {
@@ -567,7 +612,12 @@ export default function NewQuotePage() {
       store.reset();
       router.push(store.edit_mode ? `/employee/quotes/${store.edit_quote_id}` : '/employee/quotes');
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Save failed');
+      // Supabase rejects with a PostgrestError-shaped plain object, not an
+      // Error instance — `err instanceof Error` was false, so every failure
+      // collapsed to a bare "Save failed" with no cause. Pull out whatever
+      // detail the driver gave us.
+      console.error('Save quote error:', err);
+      toast.error(`Save failed: ${describeError(err)}`, { duration: 12000 });
     } finally {
       setSaving(false);
     }
@@ -633,7 +683,7 @@ export default function NewQuotePage() {
     }
     // Step 3: Terms & Conditions
     if (step === 3) {
-      if (exchangeRate <= 0) { toast.error('Dollar rate is required and must be > 0'); return false; }
+      if (isIntl && exchangeRate <= 0) { toast.error('Dollar rate is required and must be > 0'); return false; }
       if (store.packing_price <= 0) { toast.error('Packing price is required and must be > 0'); return false; }
       if (!store.delivery_text.trim()) { toast.error('Delivery timeline is required (e.g. "4-6 working weeks")'); return false; }
       if (store.pricing_type === 'for-site' && store.freight_price <= 0) { toast.error('Freight price is required for F.O.R. pricing'); return false; }
@@ -652,7 +702,7 @@ export default function NewQuotePage() {
           <h1 className="text-2xl font-bold tracking-tight">{store.edit_mode ? 'Edit Quote' : 'Create New Quote'}</h1>
           <p className="text-muted-foreground text-sm mt-1">Step {store.currentStep + 1} of {STEPS.length}{store.edit_mode && ` • Editing ${store.custom_quote_number}`}</p>
         </div>
-        {exchangeRate > 0 && (
+        {isIntl && exchangeRate > 0 && (
           <Badge variant="outline" className="text-xs font-mono gap-1">
             💱 1 USD = ₹{exchangeRate.toLocaleString('en-IN')}
           </Badge>
@@ -835,18 +885,21 @@ function StepTermsPricing({ customers, exchangeRate, onRateChange }: { customers
         <Card>
           <CardHeader><CardTitle className="text-base">Pricing & Charges</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Dollar Rate <span className="text-muted-foreground text-xs">(1 USD = ₹) *</span></Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={exchangeRate || ''}
-                onChange={(e) => onRateChange(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
-                placeholder="e.g. 83.5"
-              />
-              <p className="text-xs text-muted-foreground">This rate is used for all USD conversions in this quote.</p>
-            </div>
+            {/* Dollar rate only matters for international (USD) customers */}
+            {isIntl && (
+              <div className="space-y-2">
+                <Label>Dollar Rate <span className="text-muted-foreground text-xs">(1 USD = ₹) *</span></Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={exchangeRate || ''}
+                  onChange={(e) => onRateChange(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
+                  placeholder="e.g. 83.5"
+                />
+                <p className="text-xs text-muted-foreground">This rate is used for all USD conversions in this quote.</p>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Pricing Type</Label>
               <Select value={store.pricing_type} onValueChange={(v) => store.setQuoteSettings({ pricing_type: (v ?? 'ex-works') as 'ex-works' | 'for-site' | 'custom' })}>
@@ -1309,8 +1362,11 @@ function StepProducts({
                     <div className="space-y-1.5">
                       <Label className="text-xs">Cage Material *</Label>
                       <Select value={product.cage_material_id} onValueChange={(v) => {
-                        const m = (materials['Cage'] ?? []).find(m => m.id === v);
-                        store.updateProduct(product.id, { cage_material_id: v ?? '', cage_material_name: m?.material_name ?? '' });
+                        // NONE_VALUE clears the selection — the dropdown has no
+                        // other way back to "not selected".
+                        const id = v === NONE_VALUE ? '' : (v ?? '');
+                        const m = (materials['Cage'] ?? []).find(m => m.id === id);
+                        store.updateProduct(product.id, { cage_material_id: id, cage_material_name: m?.material_name ?? '' });
                       }}>
                         <SelectTrigger className={`h-9 ${!product.cage_material_id ? 'border-red-500 border-2' : ''}`}>
                           <SelectValue placeholder="Select">
@@ -1318,6 +1374,7 @@ function StepProducts({
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value={NONE_VALUE}>— None —</SelectItem>
                           {(materials['Cage'] ?? []).map(m => (
                             <SelectItem key={m.id} value={m.id}>{m.material_name}</SelectItem>
                           ))}
@@ -1354,9 +1411,10 @@ function StepProducts({
                       {(() => {
                         const sealTypes = [...new Set(sealRingRows.filter(sr => sr.series_id === product.series_id && sr.size === product.size && sr.rating === product.rating).map(sr => sr.seal_type))];
                         return (
-                        <Select value={product.seal_ring_type || ''} onValueChange={(v) => store.updateProduct(product.id, { seal_ring_type: v ?? '' })}>
+                        <Select value={product.seal_ring_type || ''} onValueChange={(v) => store.updateProduct(product.id, { seal_ring_type: v === NONE_VALUE ? '' : (v ?? '') })}>
                           <SelectTrigger className={`h-9 ${!product.seal_ring_type ? 'border-red-500 border-2' : ''}`}><SelectValue placeholder={sealTypes.length > 0 ? 'Select' : 'No seal types available'} /></SelectTrigger>
                           <SelectContent>
+                            <SelectItem value={NONE_VALUE}>— None —</SelectItem>
                             {sealTypes.map((s: string) => (
                               <SelectItem key={s} value={s}>{s}</SelectItem>
                             ))}
@@ -1819,14 +1877,16 @@ function StepLineItemsPricing({
   const isIntl = customer?.is_international ?? false;
   const isDealer = customer?.customer_type === 'dealer';
 
+  const rate = exchangeRate || 83.5;
+
   const fmt = (v: number) =>
     isIntl
-      ? `$${Math.round(v / (exchangeRate || 83.5)).toLocaleString('en-US')}`
+      ? `$${convertToUSD(v, rate).toLocaleString('en-US')}`
       : `\u20b9${v.toLocaleString('en-IN')}`;
 
   const fmtLine = (unitPriceINR: number, qty: number) =>
     isIntl
-      ? `$${lineToUSD(unitPriceINR, qty, exchangeRate || 83.5).toLocaleString('en-US')}`
+      ? `$${lineToUSD(unitPriceINR, qty, rate).toLocaleString('en-US')}`
       : `\u20b9${(unitPriceINR * qty).toLocaleString('en-IN')}`;
 
   const anyUncalculated = store.products.some(p => p.unit_price <= 0 || p.price_stale);
@@ -1996,8 +2056,19 @@ function StepLineItemsPricing({
         <div className="rounded-lg border bg-muted/20 px-6 py-3 space-y-1 text-sm min-w-[220px]">
           <div className="flex justify-between gap-8">
             <span className="text-muted-foreground">Products Subtotal</span>
-            <span className="font-bold">{isIntl ? `$${store.products.reduce((s, p) => s + lineToUSD(p.unit_price, p.quantity, exchangeRate || 83.5), 0).toLocaleString('en-US')}` : `₹${store.products.reduce((s, p) => s + p.line_total, 0).toLocaleString('en-IN')}`}</span>
+            <span className="font-bold">{isIntl ? `$${store.products.reduce((s, p) => s + lineToUSD(p.unit_price, p.quantity, rate), 0).toLocaleString('en-US')}` : `₹${store.products.reduce((s, p) => s + p.line_total, 0).toLocaleString('en-IN')}`}</span>
           </div>
+          {isIntl && (
+            <>
+              <div className="flex justify-between gap-8 text-xs text-muted-foreground">
+                <span>In INR</span>
+                <span>₹{store.products.reduce((s, p) => s + p.line_total, 0).toLocaleString('en-IN')}</span>
+              </div>
+              <p className="text-[10px] text-sky-600 dark:text-sky-400 font-mono">
+                💱 1 USD = ₹{rate.toLocaleString('en-IN')} · USD rounded up per unit
+              </p>
+            </>
+          )}
           {isDealer && store.agent_commission_pct > 0 && (
             <p className="text-[10px] text-violet-600 dark:text-violet-400">
               Commission ({store.agent_commission_pct}%) baked into each product price
@@ -2018,18 +2089,35 @@ function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Cu
   const store = useQuoteStore();
   const customer = customers.find(c => c.id === store.customer_id);
   const isIntl = customer?.is_international ?? false;
-  const taxPct = isIntl ? 0 : 18;
-  const subtotal = store.products.reduce((s, p) => s + p.line_total, 0);
-  const freight = store.pricing_type === 'for-site' ? store.freight_price : 0;
-  const packing = store.packing_price;
-  const customCharge = store.pricing_type === 'custom' ? store.custom_pricing_price : 0;
-  const taxableAmount = subtotal + freight + packing + customCharge;
-  const taxAmount = Math.round(taxableAmount * taxPct / 100);
+  const rate = exchangeRate;
+
+  // ── Base amounts in INR (all maths happens in INR) ──
+  const productSubtotalINR = store.products.reduce((s, p) => s + p.line_total, 0);
+  const freightINR = store.pricing_type === 'for-site' ? store.freight_price : 0;
+  const packingINR = store.packing_price;
+  const customChargeINR = store.pricing_type === 'custom' ? store.custom_pricing_price : 0;
+  const taxableINR = productSubtotalINR + freightINR + packingINR + customChargeINR;
+  const taxINR = isIntl ? 0 : Math.round(taxableINR * 0.18);
+
+  // ── Display amounts ──
+  // For USD, convert each component exactly the way the Line Items screen, the
+  // saved totals and the PDF do (round each unit price UP, then × qty). This is
+  // why the two screens used to disagree: converting the summed INR is not the
+  // same number as summing the per-line USD.
+  const subtotal = isIntl
+    ? store.products.reduce((s, p) => s + lineToUSD(p.unit_price, p.quantity, rate), 0)
+    : productSubtotalINR;
+  const freight = isIntl ? convertToUSD(freightINR, rate) : freightINR;
+  const packing = isIntl ? convertToUSD(packingINR, rate) : packingINR;
+  const customCharge = isIntl ? convertToUSD(customChargeINR, rate) : customChargeINR;
+  const taxableAmount = isIntl ? subtotal + freight + packing + customCharge : taxableINR;
+  const taxAmount = isIntl ? 0 : taxINR;
   const grandTotal = taxableAmount + taxAmount;
 
-  const fmt = (v: number) => isIntl
-    ? `$${convertToUSD(v, exchangeRate).toLocaleString('en-US')}`
-    : `₹${v.toLocaleString('en-IN')}`;
+  /** Format a value that is ALREADY in the display currency. */
+  const money = (v: number) => isIntl
+    ? `$${Math.ceil(v).toLocaleString('en-US')}`
+    : `₹${Math.round(v).toLocaleString('en-IN')}`;
 
   return (
     <div className="space-y-6">
@@ -2052,16 +2140,16 @@ function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Cu
         <Card>
           <CardHeader><CardTitle className="text-base">Pricing Breakdown</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">Products ({store.products.length})</span><span>{fmt(subtotal)}</span></div>
-            {freight > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Freight</span><span>{fmt(freight)}</span></div>}
-            {packing > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Packing</span><span>{fmt(packing)}</span></div>}
+            <div className="flex justify-between"><span className="text-muted-foreground">Products ({store.products.length})</span><span>{money(subtotal)}</span></div>
+            {freight > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Freight</span><span>{money(freight)}</span></div>}
+            {packing > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Packing</span><span>{money(packing)}</span></div>}
             {store.pricing_type === 'custom' && store.custom_pricing_title && customCharge > 0 && (
-              <div className="flex justify-between"><span className="text-muted-foreground">{store.custom_pricing_title}</span><span>{fmt(customCharge)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">{store.custom_pricing_title}</span><span>{money(customCharge)}</span></div>
             )}
             <Separator />
-            <div className="flex justify-between"><span className="text-muted-foreground">Taxable Amount</span><span>{fmt(taxableAmount)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Taxable Amount</span><span>{money(taxableAmount)}</span></div>
             {!isIntl && (
-              <div className="flex justify-between"><span className="text-muted-foreground">GST (18%)</span><span>{fmt(taxAmount)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">GST (18%)</span><span>{money(taxAmount)}</span></div>
             )}
             {isIntl && (
               <div className="flex justify-between text-muted-foreground/60"><span>GST</span><span>N/A (International)</span></div>
@@ -2069,10 +2157,16 @@ function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Cu
             <Separator />
             <div className="flex justify-between font-bold text-base">
               <span>Grand Total</span>
-              <span className="text-primary">{fmt(grandTotal)}</span>
+              <span className="text-primary">{money(grandTotal)}</span>
             </div>
             {isIntl && (
-              <p className="text-[10px] text-muted-foreground">Exchange Rate: 1 USD = ₹{exchangeRate}</p>
+              <>
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Grand Total in INR</span>
+                  <span>₹{Math.round(taxableINR).toLocaleString('en-IN')}</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground">Exchange Rate: 1 USD = ₹{rate} · USD rounded up per unit</p>
+              </>
             )}
           </CardContent>
         </Card>
@@ -2090,8 +2184,8 @@ function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Cu
                   <p className="text-xs text-muted-foreground">{p.size} | {p.rating} | {p.end_connect_type} | Qty: {p.quantity}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-semibold">{fmt(p.unit_price)}</p>
-                  <p className="text-xs text-muted-foreground">Line: {isIntl ? `$${lineToUSD(p.unit_price, p.quantity, exchangeRate).toLocaleString('en-US')}` : `₹${p.line_total.toLocaleString('en-IN')}`}</p>
+                  <p className="text-sm font-semibold">{money(isIntl ? convertToUSD(p.unit_price, rate) : p.unit_price)}</p>
+                  <p className="text-xs text-muted-foreground">Line: {isIntl ? `$${lineToUSD(p.unit_price, p.quantity, rate).toLocaleString('en-US')}` : `₹${p.line_total.toLocaleString('en-IN')}`}</p>
                 </div>
               </div>
             ))}

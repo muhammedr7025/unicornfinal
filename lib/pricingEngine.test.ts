@@ -14,6 +14,7 @@ import {
   calculateProductPrice,
   calculateQuoteTotal,
   convertToUSD,
+  lineToUSD,
 } from './pricingEngine';
 import type { ComponentCosts, PricingParams } from '@/types';
 
@@ -290,8 +291,9 @@ describe('calculateQuoteTotal', () => {
     const result = calculateQuoteTotal(products, 'ex-works', 0, [], 0, false);
     expect(result.productSubtotal).toBe(80860);
     expect(result.subtotal).toBe(80860);
-    expect(result.taxAmount).toBeCloseTo(80860 * 0.18, 2);
-    expect(result.grandTotal).toBeCloseTo(80860 * 1.18, 2);
+    // GST rounded to whole rupees (no paise)
+    expect(result.taxAmount).toBe(Math.round(80860 * 0.18));
+    expect(result.grandTotal).toBe(80860 + Math.round(80860 * 0.18));
   });
 
   it('calculates for-site with freight', () => {
@@ -336,13 +338,15 @@ describe('calculateQuoteTotal', () => {
 // ============================================================
 
 describe('convertToUSD', () => {
-  it('converts INR to USD using Math.round', () => {
+  it('exact multiples convert cleanly', () => {
     expect(convertToUSD(83500, 83.5)).toBe(1000);
   });
 
-  it('rounds correctly', () => {
-    // 100000 / 83.5 = 1197.60... → rounds to 1198
+  it('rounds UP to the next whole dollar (ceiling)', () => {
+    // 100000 / 83.5 = 1197.60... → ceil to 1198
     expect(convertToUSD(100000, 83.5)).toBe(1198);
+    // 83000 / 83.5 = 994.01... → ceil to 995 (Math.round would give 994)
+    expect(convertToUSD(83000, 83.5)).toBe(995);
   });
 
   it('handles zero exchange rate', () => {
@@ -355,6 +359,22 @@ describe('convertToUSD', () => {
 
   it('handles zero amount', () => {
     expect(convertToUSD(0, 83.5)).toBe(0);
+  });
+});
+
+describe('lineToUSD', () => {
+  it('rounds the unit price UP, then multiplies by quantity', () => {
+    // ceil(8320 / 83.5) × 2 = ceil(99.64) × 2 = 100 × 2 = 200
+    expect(lineToUSD(8320, 2, 83.5)).toBe(200);
+  });
+
+  it('equals convertToUSD(unit) × qty (never round of the product)', () => {
+    const unit = 52950, qty = 3, rate = 83.5;
+    expect(lineToUSD(unit, qty, rate)).toBe(convertToUSD(unit, rate) * qty);
+  });
+
+  it('handles zero exchange rate', () => {
+    expect(lineToUSD(10000, 5, 0)).toBe(0);
   });
 });
 

@@ -32,7 +32,9 @@ Font.register({
 
 const LOGO_DATA: string = (() => {
   try {
-    const p = path.join(process.cwd(), 'public', 'unicorn-logo.png');
+    // Flattened (white-background) logo — the transparent PNG renders with a
+    // grey box behind it in @react-pdf/renderer.
+    const p = path.join(process.cwd(), 'public', 'unicorn-logo-print.png');
     return `data:image/png;base64,${fs.readFileSync(p).toString('base64')}`;
   } catch {
     return '';
@@ -108,6 +110,18 @@ const s = StyleSheet.create({
   },
   footerBasicName: { fontSize: 8, fontWeight: 700, color: c.black },
   footerBasicLine: { fontSize: 7.5, color: c.black, lineHeight: 1.35 },
+
+  /* Page number for the cover / summary pages — sits below the address block
+     so adding it cannot push the footer up into the page content. */
+  pageNumBottom: {
+    position: 'absolute',
+    bottom: 11,
+    left: 40,
+    right: 40,
+    textAlign: 'center',
+    fontSize: 7.5,
+    color: c.gray,
+  },
 
   /* ── Branded summary header ── */
   summaryHeader: {
@@ -288,6 +302,19 @@ function FooterBasic() {
   );
 }
 
+/* ── Live page number ──
+   Rendered per page by @react-pdf so it always reflects the real position in
+   the document. Hardcoding it broke as soon as the item table overflowed. */
+function PageNumber() {
+  return (
+    <Text
+      style={s.pageNumBottom}
+      fixed
+      render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`}
+    />
+  );
+}
+
 /* ── T&C footer (red, with URL) ── */
 function FooterTC() {
   return (
@@ -357,10 +384,10 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
   const sym = isIntl ? '$' : 'Rs.';
   const isUnpriced = mode === 'unpriced-summary';
 
-  // ── USD conversion: full precision, format to 2 decimals at display time ──
-  const toUSD = (inr: number) => exchangeRate > 0 ? inr / exchangeRate : 0;
-  const fmtUSDVal = (usd: number) => `${sym} ${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const fmtINRVal = (inr: number) => `${sym} ${inr.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+  // ── USD conversion: round UP to whole dollars (matches convertToUSD), no cents ──
+  const toUSD = (inr: number) => exchangeRate > 0 ? Math.ceil(inr / exchangeRate) : 0;
+  const fmtUSDVal = (usd: number) => `${sym} ${Math.ceil(usd).toLocaleString('en-US')}`;
+  const fmtINRVal = (inr: number) => `${sym} ${Math.round(inr).toLocaleString('en-IN')}`;
 
   /** Format a single INR value */
   const fmt = (inr: number) => {
@@ -480,6 +507,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
           {creator.email && <Text style={s.clSigText}>Email: {creator.email}</Text>}
 
           <FooterBasic />
+          <PageNumber />
         </Page>
       </>)}
 
@@ -551,7 +579,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
             <Text style={[s.tHeadCell, s.colTotal, { borderRightWidth: 0 }]}>Total Price{'\n'}({cur})</Text>
           </View>
           {sorted.map((p, i) => (
-            <View key={i} style={s.tRow}>
+            <View key={i} style={s.tRow} wrap={false}>
               <Text style={[s.tCell, s.colSn, s.tCellCenter]}>{i + 1}</Text>
               <Text style={[s.tCell, s.colTag, s.tCellCenter]}>{p.tag_number || ''}</Text>
               <Text style={[s.tCell, s.colDesc]}>{p.description}</Text>
@@ -611,37 +639,37 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
         <Text style={s.sectionTitle}>COMMERCIAL TERMS &amp; CONDITIONS</Text>
 
         <View style={s.termsTable}>
-          <View style={s.termRow}>
+          <View style={s.termRow} wrap={false}>
             <Text style={s.termLabel}>Prices</Text>
             <Text style={s.termValue}>{isForSite ? 'F.O.R.' : 'Ex-Works'} {cur} each net</Text>
           </View>
-          <View style={s.termRow}>
+          <View style={s.termRow} wrap={false}>
             <Text style={s.termLabel}>Validity</Text>
             <Text style={s.termValue}>{quote.validity_days} days from the date of quotation</Text>
           </View>
-          <View style={s.termRow}>
+          <View style={s.termRow} wrap={false}>
             <Text style={s.termLabel}>Delivery{'\n'}(Ex-Works)</Text>
             <Text style={s.termValue}>{quote.delivery_text}</Text>
           </View>
-          <View style={s.termRow}>
+          <View style={s.termRow} wrap={false}>
             <Text style={s.termLabel}>Warranty</Text>
             <Text style={s.termValue}>UVPL Standard Warranty - {quote.warranty_shipment_months} months from shipping or {quote.warranty_installation_months} months from installation, whichever is earlier (on material & workmanship)</Text>
           </View>
-          <View style={s.termRow}>
+          <View style={s.termRow} wrap={false}>
             <Text style={s.termLabel}>Payment Terms</Text>
             <Text style={s.termValue}>{paymentTerms}</Text>
           </View>
           {!isForSite && (
-            <View style={s.termRow}>
+            <View style={s.termRow} wrap={false}>
               <Text style={s.termLabel}>Freight</Text>
               <Text style={s.termValue}>{quote.freight_price > 0 ? `Included: ${fmt(quote.freight_price)}` : 'To be borne by buyer'}</Text>
             </View>
           )}
-          <View style={s.termRow}>
+          <View style={s.termRow} wrap={false}>
             <Text style={s.termLabel}>Insurance</Text>
             <Text style={s.termValue}>To be arranged by buyer</Text>
           </View>
-          <View style={[s.termRow, { borderBottomWidth: 0 }]}>
+          <View style={[s.termRow, { borderBottomWidth: 0 }]} wrap={false}>
             <Text style={s.termLabel}>Manufacturer</Text>
             <Text style={s.termValue}>Unicorn Valves Private Limited</Text>
           </View>
@@ -651,6 +679,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
         {signaturePart}
 
         <FooterBasic />
+        <PageNumber />
       </Page>
 
       {/* ════════════ PAGES 3-6 — T&C (only in complete mode) ════════════ */}
@@ -708,7 +737,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
           </View>
 
           <View style={s.tcPageRow} fixed>
-            <Text style={s.tcPageNum}>1</Text>
+            <Text style={s.tcPageNum} fixed render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
             <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
           </View>
           <FooterTC />
@@ -768,7 +797,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
           </View>
 
           <View style={s.tcPageRow} fixed>
-            <Text style={s.tcPageNum}>2</Text>
+            <Text style={s.tcPageNum} fixed render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
             <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
           </View>
           <FooterTC />
@@ -812,7 +841,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
           </View>
 
           <View style={s.tcPageRow} fixed>
-            <Text style={s.tcPageNum}>3</Text>
+            <Text style={s.tcPageNum} fixed render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
             <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
           </View>
           <FooterTC />
@@ -857,7 +886,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
           </View>
 
           <View style={s.tcPageRow} fixed>
-            <Text style={s.tcPageNum}>4</Text>
+            <Text style={s.tcPageNum} fixed render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
             <Text style={s.tcRevision}>FR/MK/05, REV No: 1, Rev.Date: 15/05/2017</Text>
           </View>
           <FooterTC />
