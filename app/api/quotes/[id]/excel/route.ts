@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import * as XLSX from 'xlsx';
+import { calculateQuoteTotal, convertToUSD, roundToNearest10, roundUpRupee } from '@/lib/pricingEngine';
 
 export async function GET(
   request: NextRequest,
@@ -76,17 +77,23 @@ export async function GET(
     };
 
     const applyMargin = (cost: number, pct: number) => (cost <= 0 || pct >= 100) ? cost : cost / (1 - pct / 100);
-    const r10 = (v: number) => Math.ceil(v / 10) * 10;
+    const r10 = roundToNearest10;
 
     const isIntl = customer.is_international;
-    const taxRate = isIntl ? 0 : 0.18;
     const subtotalProducts = productList.reduce((s, p) => s + Number(p.line_total_inr ?? 0), 0);
     const freight = quote.pricing_type === 'for-site' ? Number(quote.freight_price ?? 0) : 0;
     const packing = Number(quote.packing_price ?? 0);
     const customCharge = quote.pricing_type === 'custom' ? Number(quote.custom_pricing_price ?? 0) : 0;
-    const taxable = subtotalProducts + freight + packing + customCharge;
-    const taxAmount = taxable * taxRate;
-    const grandTotal = taxable + taxAmount;
+    // Same helper the wizard saves with, so the workbook's GST and grand total
+    // match the stored ones instead of re-deriving an unrounded tax.
+    const { subtotal: taxable, taxAmount, grandTotal } = calculateQuoteTotal(
+      productList.map((p) => ({ lineTotal: Number(p.line_total_inr ?? 0) })),
+      quote.pricing_type,
+      Number(quote.freight_price ?? 0),
+      quote.custom_pricing_title ? [{ name: quote.custom_pricing_title, price: Number(quote.custom_pricing_price ?? 0) }] : [],
+      packing,
+      isIntl,
+    );
 
     const wb = XLSX.utils.book_new();
 
@@ -121,7 +128,7 @@ export async function GET(
       ['Taxable Amount (INR)', taxable],
       ...(!isIntl ? [['GST 18% (INR)', taxAmount]] : []),
       ['GRAND TOTAL (INR)', grandTotal],
-      ...(isIntl ? [['Exchange Rate', `1 USD = ₹${quote.exchange_rate_snapshot ?? 83.5}`], ['GRAND TOTAL (USD)', Math.round(grandTotal / Number(quote.exchange_rate_snapshot ?? 83.5))]] : []),
+      ...(isIntl ? [['Exchange Rate', `1 USD = ₹${quote.exchange_rate_snapshot ?? 83.5}`], ['GRAND TOTAL (USD)', convertToUSD(grandTotal, Number(quote.exchange_rate_snapshot ?? 83.5))]] : []),
       [],
       ['Prepared By', profile?.full_name ?? ''],
       ['Phone', profile?.phone ?? ''],
@@ -240,7 +247,7 @@ export async function GET(
       const unitPrice = r10(afterDisc);
       const lineTotal = r10(unitPrice * qty);
 
-      const INR = (v: number) => Math.round(v);
+      const INR = roundUpRupee;
       const sheetData: (string | number | null)[][] = [
         [`PRODUCT ${i + 1} — COST BREAKDOWN`],
         [`Quote: ${quote.quote_number}  |  Customer: ${customer.name}`],
@@ -287,22 +294,35 @@ export async function GET(
       }
 
       sheetData.push([]);
+      // Each running total is rounded UP to the whole rupee, and every step
+      // amount is the difference between two rounded totals — so the column
+      // adds up exactly, and no step (commission and discount especially) is
+      // ever shown a rupee light the way Math.round() used to show it.
+      const chainMfgCost = INR(mfgCost);
+      const chainMfgWithProfit = INR(mfgWithProfit);
+      const chainBoCost = INR(boCost);
+      const chainBoWithProfit = INR(boWithProfit);
+      const chainUnitCost = INR(unitCost);
+      const chainAfterNeg = INR(afterNeg);
+      const chainAfterComm = INR(afterComm);
+      const chainAfterDisc = INR(afterDisc);
+
       sheetData.push(['PRICING CHAIN', '', '', '', '', '', '(₹)']);
-      sheetData.push(['Manufacturing Cost (body+bonnet+plug+seat+stem+cage+seal+pilot+testing+tubing+act+hw)', '', '', '', '', '', INR(mfgCost)]);
-      sheetData.push([`Mfg Profit (${mfgProfitPct}% margin-on-price)`, '', '', '', '', '', INR(mfgWithProfit - mfgCost)]);
-      sheetData.push(['Mfg Cost After Profit', '', '', '', '', '', INR(mfgWithProfit)]);
-      sheetData.push(['Bought-out Cost (accessories)', '', '', '', '', '', INR(boCost)]);
-      sheetData.push([`BO Profit (${boProfitPct}% margin-on-price)`, '', '', '', '', '', INR(boWithProfit - boCost)]);
-      sheetData.push(['Unit Cost (Mfg + BO)', '', '', '', '', '', INR(unitCost)]);
-      sheetData.push([`Negotiation Margin (${negMarginPct}%)`, '', '', '', '', '', INR(afterNeg - unitCost)]);
-      sheetData.push(['After Negotiation Margin', '', '', '', '', '', INR(afterNeg)]);
+      sheetData.push(['Manufacturing Cost (body+bonnet+plug+seat+stem+cage+seal+pilot+testing+tubing+act+hw)', '', '', '', '', '', chainMfgCost]);
+      sheetData.push([`Mfg Profit (${mfgProfitPct}% margin-on-price)`, '', '', '', '', '', chainMfgWithProfit - chainMfgCost]);
+      sheetData.push(['Mfg Cost After Profit', '', '', '', '', '', chainMfgWithProfit]);
+      sheetData.push(['Bought-out Cost (accessories)', '', '', '', '', '', chainBoCost]);
+      sheetData.push([`BO Profit (${boProfitPct}% margin-on-price)`, '', '', '', '', '', chainBoWithProfit - chainBoCost]);
+      sheetData.push(['Unit Cost (Mfg + BO)', '', '', '', '', '', chainUnitCost]);
+      sheetData.push([`Negotiation Margin (${negMarginPct}%)`, '', '', '', '', '', chainAfterNeg - chainUnitCost]);
+      sheetData.push(['After Negotiation Margin', '', '', '', '', '', chainAfterNeg]);
       if (commPct > 0) {
-        sheetData.push([`Agent Commission (${commPct}%)`, '', '', '', '', '', INR(afterComm - afterNeg)]);
-        sheetData.push(['After Commission', '', '', '', '', '', INR(afterComm)]);
+        sheetData.push([`Agent Commission (${commPct}%)`, '', '', '', '', '', chainAfterComm - chainAfterNeg]);
+        sheetData.push(['After Commission', '', '', '', '', '', chainAfterComm]);
       }
       if (discPct > 0) {
-        sheetData.push([`Discount (${discPct}%)`, '', '', '', '', '', INR(afterDisc - afterComm)]);
-        sheetData.push(['After Discount', '', '', '', '', '', INR(afterDisc)]);
+        sheetData.push([`Discount (${discPct}%)`, '', '', '', '', '', chainAfterDisc - chainAfterComm]);
+        sheetData.push(['After Discount', '', '', '', '', '', chainAfterDisc]);
       }
       sheetData.push([`⭐ UNIT PRICE (rounded to ₹10)`, '', '', '', '', '', unitPrice]);
       sheetData.push([`LINE TOTAL (×${qty} qty, rounded to ₹10)`, '', '', '', '', '', lineTotal]);

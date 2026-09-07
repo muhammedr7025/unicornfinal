@@ -11,7 +11,7 @@ import { Download, Loader2, ArrowLeft, FileSpreadsheet, Shield, Truck, CreditCar
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import Link from 'next/link';
 import { use } from 'react';
-import { convertToUSD, lineToUSD } from '@/lib/pricingEngine';
+import { convertToUSD, unitPriceToUSD, lineToUSD, roundUpRupee } from '@/lib/pricingEngine';
 
 export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -133,9 +133,14 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
   const isIntl = customer.is_international;
   // Currency: INR whole rupees, USD rounded UP to whole dollars (matches the
   // wizard and the PDF via the canonical pricing-engine helpers).
-  const fmtINR = (v: number) => `₹${Math.round(v).toLocaleString('en-IN')}`;
+  // INR rounds UP to the next whole rupee; a quoted USD unit price rounds UP to
+  // the next $10 (the dollar mirror of the ₹10 rule), while quote-level charges
+  // — packing, freight, custom items, GST — round up to the next whole dollar,
+  // exactly as they carry no ₹10 rounding in INR.
+  const fmtINR = (v: number) => `₹${roundUpRupee(v).toLocaleString('en-IN')}`;
   const toUSD = (v: number) => convertToUSD(v, exchangeRate);
   const fmtUSD = (v: number) => `$${convertToUSD(v, exchangeRate).toLocaleString('en-US')}`;
+  const fmtUnitUSD = (v: number) => `$${unitPriceToUSD(v, exchangeRate).toLocaleString('en-US')}`;
   const fmtUSDRaw = (v: number) => `$${Math.ceil(v).toLocaleString('en-US')}`;
   const fmt = (v: number) => isIntl ? fmtUSD(v) : fmtINR(v);
 
@@ -343,7 +348,7 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
                         <TableCell>
                           <p className="text-sm font-medium">{p.description || `${p.size} | ${p.rating} | ${p.end_connect_type}`}</p>
                         </TableCell>
-                        {isIntl && <TableCell className="text-right text-blue-600 dark:text-blue-400 font-semibold">{fmtUSD(unitINR)}</TableCell>}
+                        {isIntl && <TableCell className="text-right text-blue-600 dark:text-blue-400 font-semibold">{fmtUnitUSD(unitINR)}</TableCell>}
                         <TableCell className="text-right font-semibold">{fmtINR(unitINR)}</TableCell>
                         <TableCell className="text-center">{p.quantity}</TableCell>
                         {isIntl && <TableCell className="text-right text-blue-600 dark:text-blue-400 font-semibold">{fmtUSDRaw(lineToUSD(unitINR, p.quantity, exchangeRate))}</TableCell>}

@@ -576,13 +576,29 @@ Negative margins are clamped to 0
 
 **Rounding Rule:**
 ```
-roundToNearest10(value) = Math.ceil(value ÷ 10) × 10
+roundToNearest10(value) = ceiling of value to the next ₹10
 
 Examples:
   ₹1000 → ₹1000
   ₹1001 → ₹1010
   ₹1009 → ₹1010
   ₹1234 → ₹1240
+```
+
+**Every money figure rounds UP — never to the nearest, never down:**
+```
+roundUpRupee(value) = ceiling of value to the next whole ₹
+
+Used for GST, the Excel pricing-chain rows, and every rupee figure shown on
+the Review screen, the quote detail page and the PDF.
+
+Examples:
+  ₹22222.08 → ₹22223   (Math.round would have given ₹22222)
+  ₹14554.80 → ₹14555
+  ₹9000.00  → ₹9000
+
+Both ceilings absorb binary floating-point dust (a relative 1e-9 slack), so a
+value that is mathematically an exact multiple is never bumped to the next one.
 ```
 
 **Discount Calculation:**
@@ -633,7 +649,7 @@ Step 3: Calculate Tax
   ELSE:
     taxRate = 18%  (GST for India)
   
-  taxAmount = subtotal × taxRate
+  taxAmount = roundUpRupee(subtotal × taxRate)   // CEILING to the next ₹1
 
 Step 4: Grand Total
   grandTotal = subtotal + taxAmount
@@ -644,15 +660,29 @@ RETURN { productSubtotal, subtotal, taxAmount, grandTotal }
 ### **Currency Conversion (Display Only)**
 
 ```typescript
-function convertToUSD(amountINR: number, exchangeRate: number): number {
-  return Math.round(amountINR ÷ exchangeRate)
-}
+// Quote-level charges (packing, freight, custom items, totals):
+// ceiling to the next whole dollar — these carry no ₹10 rounding in INR either.
+function convertToUSD(amountINR: number, exchangeRate: number): number
+
+// Quoted UNIT prices: ceiling to the next $10 — the dollar mirror of the ₹10
+// ceiling roundToNearest10 applies to every INR unit price at step 9.
+function unitPriceToUSD(unitPriceINR: number, exchangeRate: number): number
+
+// Line total: round the unit price up FIRST, then multiply.
+// Never round(unit × qty) — line must always equal unit × qty in USD too.
+function lineToUSD(unitPriceINR, quantity, exchangeRate): number
+
+Examples (rate = ₹83.5):
+  unitPriceToUSD(₹52950)  → 634.13… → $640
+  unitPriceToUSD(₹83500)  → 1000.00 → $1000
+  convertToUSD(₹100000)   → 1197.60… → $1198
+  lineToUSD(₹8320, qty 2) → $100 × 2 = $200
 
 Notes:
-  - Exchange rate stored in global_settings
-  - Used for PDF/Excel display ONLY
+  - Exchange rate stored in global_settings, snapshotted per quote
+  - Used for screen/PDF/Excel display ONLY
   - All calculations happen in INR
-  - Math.round() used (not floor or ceil)
+  - Always a ceiling, so a quote never undercharges against its INR price
 ```
 
 ---

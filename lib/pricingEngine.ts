@@ -9,11 +9,41 @@
 import type { ComponentCosts, PricingParams, PricingResult, QuoteTotalResult, CustomItem } from '@/types';
 
 /**
+ * Round UP to the next multiple of `step` (ceiling, NOT standard rounding).
+ *
+ * The epsilon absorbs binary floating-point dust so a value that is
+ * mathematically an exact multiple is not pushed to the next one:
+ * 1000 × (0.1 + 0.2) × 100 is 30000.000000000004 in IEEE-754, and a naive
+ * ceiling would return 30010. The slack is relative (≈1e-9 of the value), far
+ * below one paisa at any realistic quote size, so a genuine fraction still
+ * rounds up.
+ */
+function ceilTo(value: number, step: number): number {
+  const quotient = value / step;
+  const epsilon = 1e-9 * Math.max(1, Math.abs(quotient));
+  // `+ 0` normalises the -0 that Math.ceil returns for values in (-step, 0].
+  return Math.ceil(quotient - epsilon) * step + 0;
+}
+
+/**
  * Round UP to the nearest ₹10 (ceiling, NOT standard rounding).
  * Only applied at steps 9 and 10 of the pricing chain.
  */
 export function roundToNearest10(value: number): number {
-  return Math.ceil(value / 10) * 10;
+  return ceilTo(value, 10);
+}
+
+/**
+ * Round UP to the next whole rupee (ceiling, NOT standard rounding).
+ *
+ * Every rupee figure that is shown or stored goes through this — GST, the
+ * pricing-chain rows in the Excel export, the totals on the Review screen,
+ * the quote detail page and the PDF. Math.round() was used before, which
+ * rounds DOWN whenever the paise are below .50 and made the quote undercharge
+ * by up to ₹1 per line.
+ */
+export function roundUpRupee(value: number): number {
+  return ceilTo(value, 1);
 }
 
 /**
@@ -189,35 +219,52 @@ export function calculateQuoteTotal(
   subtotal += packingPrice ?? 0;
 
   const taxRate = isInternational ? 0 : 0.18; // 18% GST for India, 0% international
-  // Round GST to whole rupees so stored totals never carry paise. Keeps the
+  // Round GST UP to whole rupees so stored totals never carry paise. Keeps the
   // Review screen, detail view and PDF (which all read these stored values)
   // showing the same, decimal-free number.
-  const taxAmount = Math.round(subtotal * taxRate);
+  const taxAmount = roundUpRupee(subtotal * taxRate);
   const grandTotal = subtotal + taxAmount;
 
   return { productSubtotal, subtotal, taxAmount, grandTotal };
 }
 
 /**
- * Convert INR to USD for display and PDF only.
+ * Convert an INR charge to USD for display and PDF only.
  * Calculation always happens in INR.
  *
- * Rounds UP to the next whole dollar (ceiling) so the quoted USD price never
- * undercharges relative to the INR price, mirroring the ₹10 ceiling used for
- * INR. Whole dollars only — no cents — so every screen and the PDF agree.
+ * Rounds UP to the next whole dollar (ceiling) so the quoted USD figure never
+ * undercharges relative to the INR figure. Whole dollars only — no cents — so
+ * every screen and the PDF agree.
+ *
+ * This is the rule for the quote-level charges (packing, freight, custom
+ * items, totals), which carry no ₹10 rounding in INR either. Quoted unit
+ * prices use unitPriceToUSD instead.
  */
 export function convertToUSD(amountINR: number, exchangeRate: number): number {
   if (exchangeRate <= 0) return 0;
-  return Math.ceil(amountINR / exchangeRate);
+  return ceilTo(amountINR / exchangeRate, 1);
 }
 
 /**
- * Convert a line total to USD by rounding the unit price UP first, then
- * multiplying by quantity. This keeps line = unit × qty consistent (round(unit)
- * × qty, never round(unit × qty)) and matches convertToUSD's ceiling rule.
- * Example: unit=₹8320, qty=2, rate=83.5 → ceil(99.64)×2 = $200.
+ * Convert a quoted unit price to USD, rounding UP to the next $10.
+ *
+ * This is the dollar mirror of the ₹10 ceiling that roundToNearest10 applies
+ * to every INR unit price at step 9 — the same rule, in the currency the
+ * customer is actually quoted in.
+ * Example: unit=₹52950, rate=83.5 → 634.13… → $640.
+ */
+export function unitPriceToUSD(unitPriceINR: number, exchangeRate: number): number {
+  if (exchangeRate <= 0) return 0;
+  return ceilTo(unitPriceINR / exchangeRate, 10);
+}
+
+/**
+ * Convert a line total to USD by rounding the unit price UP to the next $10
+ * first, then multiplying by quantity. This keeps line = unit × qty consistent
+ * (round(unit) × qty, never round(unit × qty)).
+ * Example: unit=₹8320, qty=2, rate=83.5 → $100 × 2 = $200.
  */
 export function lineToUSD(unitPriceINR: number, quantity: number, exchangeRate: number): number {
   if (exchangeRate <= 0) return 0;
-  return Math.ceil(unitPriceINR / exchangeRate) * quantity;
+  return unitPriceToUSD(unitPriceINR, exchangeRate) * quantity;
 }

@@ -175,6 +175,40 @@ describe('defaults', () => {
     expect(emptyProduct().price_stale).toBe(false);
   });
 
+  it('loadForEdit restores the agent commission from the saved products', () => {
+    // commission_pct lives on quote_products (schema 001), NOT on quotes —
+    // reading quote.commission_pct silently yielded undefined -> 0, so every
+    // reopened dealer quote showed 0% commission.
+    useQuoteStore.getState().loadForEdit({
+      quote: {
+        id: 'q1', customer_id: 'c1', quote_number: 'UV-1', pricing_mode: 'standard',
+        pricing_type: 'ex-works', validity_days: 30, delivery_text: '4 weeks',
+        payment_advance_pct: 30, payment_approval_pct: 0, payment_despatch_pct: 70,
+        warranty_shipment_months: 18, warranty_installation_months: 12,
+      },
+      products: [{
+        id: 'p1', quantity: 1, series_id: 's1', size: '2"', rating: '150#',
+        end_connect_type: 'Flanged', bonnet_type: 'Plain', trim_type: 'Metal to Metal',
+        commission_pct: '7.50', mfg_profit_pct: 25, bo_profit_pct: 15, neg_margin_pct: 5,
+        unit_price_inr: 15240, line_total_inr: 15240,
+      }],
+    });
+    expect(useQuoteStore.getState().agent_commission_pct).toBe(7.5);
+  });
+
+  it('loadForEdit falls back to 0 commission when the quote has no products', () => {
+    useQuoteStore.getState().loadForEdit({
+      quote: {
+        id: 'q1', customer_id: 'c1', quote_number: 'UV-1', pricing_mode: 'standard',
+        pricing_type: 'ex-works', validity_days: 30, delivery_text: '4 weeks',
+        payment_advance_pct: 30, payment_approval_pct: 0, payment_despatch_pct: 70,
+        warranty_shipment_months: 18, warranty_installation_months: 12,
+      },
+      products: [],
+    });
+    expect(useQuoteStore.getState().agent_commission_pct).toBe(0);
+  });
+
   it('loadForEdit products start not-stale', () => {
     useQuoteStore.getState().loadForEdit({
       quote: {

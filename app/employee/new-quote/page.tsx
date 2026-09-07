@@ -16,7 +16,7 @@ import {
   ChevronLeft, ChevronRight, Plus, Trash2, Copy, Save, Loader2,
   Settings2, Package, Calculator, CheckCircle, FileText, AlertTriangle
 } from 'lucide-react';
-import { calculateProductPrice, calculateQuoteTotal, roundToNearest10, convertToUSD, lineToUSD } from '@/lib/pricingEngine';
+import { calculateProductPrice, calculateQuoteTotal, roundUpRupee, convertToUSD, unitPriceToUSD, lineToUSD } from '@/lib/pricingEngine';
 import type { Customer } from '@/types';
 
 // REMOVED: const TRIM_TYPES and const SEAL_TYPES — now loaded from DB
@@ -693,6 +693,14 @@ export default function NewQuotePage() {
     }
     // Step 3: Terms & Conditions
     if (step === 3) {
+      // Catch stale prices here too, not just at Save. Anything that reaches
+      // Review with an outdated price can only be fixed two steps back, so say
+      // where to go instead of letting Save fail with no way forward.
+      const stalePrices = store.products.filter(p => p.price_stale || p.unit_price <= 0);
+      if (stalePrices.length > 0) {
+        toast.error(`${stalePrices.length} product(s) have outdated prices — go back to "Line Items & Pricing" and click "Recalculate All".`);
+        return false;
+      }
       if (isIntl && exchangeRate <= 0) { toast.error('Dollar rate is required and must be > 0'); return false; }
       if (store.packing_price <= 0) { toast.error('Packing price is required and must be > 0'); return false; }
       if (!store.delivery_text.trim()) { toast.error('Delivery timeline is required (e.g. "4-6 working weeks")'); return false; }
@@ -943,9 +951,11 @@ function StepTermsPricing({ customers, exchangeRate, onRateChange }: { customers
             )}
 
             {isDealer && (
-              <div className="space-y-2">
-                <Label>Agent Commission %</Label>
-                <Input type="number" min="0" max="100" value={store.agent_commission_pct || ''} onChange={(e) => store.setQuoteSettings({ agent_commission_pct: e.target.value === '' ? 0 : Number(e.target.value) })} />
+              <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                <p className="text-xs text-muted-foreground">
+                  Agent Commission: <strong className="text-foreground">{store.agent_commission_pct}%</strong>
+                  {' '}— change it on the <strong>Line Items &amp; Pricing</strong> step, where prices can be recalculated.
+                </p>
               </div>
             )}
             <div className="grid grid-cols-2 gap-3">
@@ -1047,6 +1057,25 @@ function StepTermsPricing({ customers, exchangeRate, onRateChange }: { customers
   );
 }
 
+/**
+ * The rate every USD figure on this screen was converted with. Rendered on the
+ * Products and Line Items & Pricing steps so the reader never has to guess
+ * which rate produced the dollar prices in front of them.
+ */
+function ExchangeRateBanner({ rate }: { rate: number }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap rounded-lg border border-sky-200 bg-sky-50/60 dark:border-sky-900 dark:bg-sky-950/20 px-3 py-2">
+      <span className="text-sm font-semibold text-sky-700 dark:text-sky-300 font-mono">
+        💱 1 USD = ₹{rate.toLocaleString('en-IN')}
+      </span>
+      <span className="text-xs text-sky-600/80 dark:text-sky-400/80">
+        All USD prices below use this rate, rounded up to the next $10 per unit.
+        Change it on the Terms &amp; Conditions step.
+      </span>
+    </div>
+  );
+}
+
 // ===================================================================
 // STEP 2: Products
 // ===================================================================
@@ -1074,7 +1103,7 @@ function StepProducts({
   const isIntl = customer?.is_international ?? false;
   const sym = isIntl ? '$' : '₹';
   const fmt = (v: number) => isIntl
-    ? `$${convertToUSD(v, exchangeRate).toLocaleString('en-US')}`
+    ? `$${unitPriceToUSD(v, exchangeRate).toLocaleString('en-US')}`
     : `₹${v.toLocaleString('en-IN')}`;
   const fmtLine = (unitPriceINR: number, qty: number) => isIntl
     ? `$${lineToUSD(unitPriceINR, qty, exchangeRate).toLocaleString('en-US')}`
@@ -1088,6 +1117,7 @@ function StepProducts({
 
   return (
     <div className="space-y-4">
+      {isIntl && exchangeRate > 0 && <ExchangeRateBanner rate={exchangeRate} />}
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{store.products.length} product(s) added</p>
         <Button onClick={() => store.addProduct()} variant="outline" size="sm" className="gap-1.5">
@@ -1767,10 +1797,6 @@ function StepProducts({
                   </div>
                 )}
                 <div className="flex items-end gap-3 flex-wrap">
-                  <div className="space-y-1.5 w-32">
-                    <Label className="text-xs font-semibold">Discount %</Label>
-                    <Input className="h-9" type="number" min="0" max="100" value={product.discount_pct || ''} onChange={(e) => store.updateProduct(product.id, { discount_pct: e.target.value === '' ? 0 : Number(e.target.value) })} />
-                  </div>
                   <Button
                     size="sm"
                     variant={canCalculate ? 'outline' : 'secondary'}
@@ -1899,7 +1925,7 @@ function StepLineItemsPricing({
 
   const fmt = (v: number) =>
     isIntl
-      ? `$${convertToUSD(v, rate).toLocaleString('en-US')}`
+      ? `$${unitPriceToUSD(v, rate).toLocaleString('en-US')}`
       : `\u20b9${v.toLocaleString('en-IN')}`;
 
   const fmtLine = (unitPriceINR: number, qty: number) =>
@@ -1911,6 +1937,8 @@ function StepLineItemsPricing({
 
   return (
     <div className="space-y-6">
+      {isIntl && rate > 0 && <ExchangeRateBanner rate={rate} />}
+
       {/* Agent Commission — only for dealer customers */}
       {isDealer && (
         <Card className="border-violet-200 bg-violet-50/40 dark:bg-violet-950/10">
@@ -1929,7 +1957,7 @@ function StepLineItemsPricing({
                   max="100"
                   step="0.5"
                   className="h-9 w-28 text-right"
-                  value={store.agent_commission_pct || ''}
+                  value={String(store.agent_commission_pct)}
                   onChange={e => store.setQuoteSettings({ agent_commission_pct: e.target.value === '' ? 0 : Number(e.target.value) })}
                 />
                 <span className="text-sm font-medium">%</span>
@@ -2035,7 +2063,7 @@ function StepLineItemsPricing({
                           max="100"
                           step="0.5"
                           className="h-8 w-20 text-right text-xs"
-                          value={p.discount_pct || ''}
+                          value={String(p.discount_pct)}
                           onChange={e => store.updateProduct(p.id, {
                             discount_pct: e.target.value === '' ? 0 : Number(e.target.value),
                             // Clear price so user knows to recalculate
@@ -2083,7 +2111,7 @@ function StepLineItemsPricing({
                 <span>₹{store.products.reduce((s, p) => s + p.line_total, 0).toLocaleString('en-IN')}</span>
               </div>
               <p className="text-[10px] text-sky-600 dark:text-sky-400 font-mono">
-                💱 1 USD = ₹{rate.toLocaleString('en-IN')} · USD rounded up per unit
+                💱 1 USD = ₹{rate.toLocaleString('en-IN')} · USD rounded up to the next $10 per unit
               </p>
             </>
           )}
@@ -2115,7 +2143,7 @@ function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Cu
   const packingINR = store.packing_price;
   const customChargeINR = store.pricing_type === 'custom' ? store.custom_pricing_price : 0;
   const taxableINR = productSubtotalINR + freightINR + packingINR + customChargeINR;
-  const taxINR = isIntl ? 0 : Math.round(taxableINR * 0.18);
+  const taxINR = isIntl ? 0 : roundUpRupee(taxableINR * 0.18);
 
   // ── Display amounts ──
   // For USD, convert each component exactly the way the Line Items screen, the
@@ -2135,7 +2163,7 @@ function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Cu
   /** Format a value that is ALREADY in the display currency. */
   const money = (v: number) => isIntl
     ? `$${Math.ceil(v).toLocaleString('en-US')}`
-    : `₹${Math.round(v).toLocaleString('en-IN')}`;
+    : `₹${roundUpRupee(v).toLocaleString('en-IN')}`;
 
   return (
     <div className="space-y-6">
@@ -2181,9 +2209,9 @@ function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Cu
               <>
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>Grand Total in INR</span>
-                  <span>₹{Math.round(taxableINR).toLocaleString('en-IN')}</span>
+                  <span>₹{roundUpRupee(taxableINR).toLocaleString('en-IN')}</span>
                 </div>
-                <p className="text-[10px] text-muted-foreground">Exchange Rate: 1 USD = ₹{rate} · USD rounded up per unit</p>
+                <p className="text-[10px] text-muted-foreground">Exchange Rate: 1 USD = ₹{rate} · USD rounded up to the next $10 per unit</p>
               </>
             )}
           </CardContent>
@@ -2202,7 +2230,7 @@ function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Cu
                   <p className="text-xs text-muted-foreground">{p.size} | {p.rating} | {p.end_connect_type} | Qty: {p.quantity}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-semibold">{money(isIntl ? convertToUSD(p.unit_price, rate) : p.unit_price)}</p>
+                  <p className="text-sm font-semibold">{money(isIntl ? unitPriceToUSD(p.unit_price, rate) : p.unit_price)}</p>
                   <p className="text-xs text-muted-foreground">Line: {isIntl ? `$${lineToUSD(p.unit_price, p.quantity, rate).toLocaleString('en-US')}` : `₹${p.line_total.toLocaleString('en-IN')}`}</p>
                 </div>
               </div>

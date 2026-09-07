@@ -9,11 +9,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   roundToNearest10,
+  roundUpRupee,
   calculateWeightBasedCost,
   calculateFixedComponentCost,
   calculateProductPrice,
   calculateQuoteTotal,
   convertToUSD,
+  unitPriceToUSD,
   lineToUSD,
 } from './pricingEngine';
 import type { ComponentCosts, PricingParams } from '@/types';
@@ -43,6 +45,35 @@ describe('roundToNearest10', () => {
     const result = roundToNearest10(-5);
     expect(result + 0).toBe(0); // -0 + 0 = 0
     expect(result >= 0).toBe(true);
+  });
+
+  it('never overshoots because of binary floating-point dust', () => {
+    // 0.1 + 0.2 === 0.30000000000000004; scaled up, dust like this used to
+    // push an exact multiple of 10 to the NEXT multiple.
+    expect(roundToNearest10(1000 * (0.1 + 0.2) * 100)).toBe(30000);
+    expect(roundToNearest10(50310.000000000007)).toBe(50310);
+  });
+});
+
+// Every rupee figure we show or store rounds UP to the next whole rupee —
+// never to the nearest, never down.
+describe('roundUpRupee', () => {
+  it('leaves whole rupees alone', () => {
+    expect(roundUpRupee(14555)).toBe(14555);
+    expect(roundUpRupee(0)).toBe(0);
+  });
+
+  it('rounds a fraction below .5 UP (Math.round would round it down)', () => {
+    expect(roundUpRupee(22222.08)).toBe(22223);
+    expect(roundUpRupee(52947.01)).toBe(52948);
+  });
+
+  it('rounds a fraction above .5 up too', () => {
+    expect(roundUpRupee(14554.8)).toBe(14555);
+  });
+
+  it('ignores floating-point dust on exact rupees', () => {
+    expect(roundUpRupee(9000.0000000000018)).toBe(9000);
   });
 });
 
@@ -291,16 +322,16 @@ describe('calculateQuoteTotal', () => {
     const result = calculateQuoteTotal(products, 'ex-works', 0, [], 0, false);
     expect(result.productSubtotal).toBe(80860);
     expect(result.subtotal).toBe(80860);
-    // GST rounded to whole rupees (no paise)
-    expect(result.taxAmount).toBe(Math.round(80860 * 0.18));
-    expect(result.grandTotal).toBe(80860 + Math.round(80860 * 0.18));
+    // GST rounded UP to whole rupees (no paise)
+    expect(result.taxAmount).toBe(roundUpRupee(80860 * 0.18));
+    expect(result.grandTotal).toBe(80860 + roundUpRupee(80860 * 0.18));
   });
 
   it('calculates for-site with freight', () => {
     const products = [{ lineTotal: 50000 }];
     const result = calculateQuoteTotal(products, 'for-site', 5000, [], 2000, false);
     expect(result.subtotal).toBe(50000 + 5000 + 2000); // 57000
-    expect(result.taxAmount).toBeCloseTo(57000 * 0.18, 2);
+    expect(result.taxAmount).toBe(roundUpRupee(57000 * 0.18));
   });
 
   it('ignores freight for ex-works', () => {
@@ -330,6 +361,25 @@ describe('calculateQuoteTotal', () => {
     const products = [{ lineTotal: 50000 }];
     const result = calculateQuoteTotal(products, 'ex-works', 0, [], 1500, false);
     expect(result.subtotal).toBe(51500);
+  });
+
+  it('rounds GST UP to the next whole rupee when the paise are below .50', () => {
+    // 123456 x 18% = 22222.08 -> Math.round gives 22222 (DOWN). Must be 22223.
+    const result = calculateQuoteTotal([{ lineTotal: 123456 }], 'ex-works', 0, [], 0, false);
+    expect(result.taxAmount).toBe(22223);
+    expect(result.grandTotal).toBe(123456 + 22223);
+  });
+
+  it('rounds GST UP when the paise are above .50 as well', () => {
+    // 80860 x 18% = 14554.80 -> 14555
+    const result = calculateQuoteTotal([{ lineTotal: 80860 }], 'ex-works', 0, [], 0, false);
+    expect(result.taxAmount).toBe(14555);
+  });
+
+  it('leaves an exact-rupee GST untouched', () => {
+    // 50000 x 18% = 9000.00 exactly - must not creep to 9001
+    const result = calculateQuoteTotal([{ lineTotal: 50000 }], 'ex-works', 0, [], 0, false);
+    expect(result.taxAmount).toBe(9000);
   });
 });
 
@@ -362,15 +412,45 @@ describe('convertToUSD', () => {
   });
 });
 
+// A quoted USD unit price rounds UP to the next $10 — the dollar mirror of
+// the ₹10 ceiling applied to INR unit prices.
+describe('unitPriceToUSD', () => {
+  it('rounds UP to the next ten dollars', () => {
+    // 52950 / 83.5 = 634.13... → 640 (not 635, and certainly not 634)
+    expect(unitPriceToUSD(52950, 83.5)).toBe(640);
+    // 8320 / 83.5 = 99.64... → 100
+    expect(unitPriceToUSD(8320, 83.5)).toBe(100);
+  });
+
+  it('leaves an exact multiple of ten alone', () => {
+    expect(unitPriceToUSD(83500, 83.5)).toBe(1000);
+  });
+
+  it('rounds a value just over a ten up to the next ten', () => {
+    // 8360 / 83.5 = 100.11... → 110
+    expect(unitPriceToUSD(8360, 83.5)).toBe(110);
+  });
+
+  it('handles a zero or negative exchange rate', () => {
+    expect(unitPriceToUSD(100000, 0)).toBe(0);
+    expect(unitPriceToUSD(100000, -1)).toBe(0);
+  });
+
+  it('handles a zero amount', () => {
+    expect(unitPriceToUSD(0, 83.5)).toBe(0);
+  });
+});
+
 describe('lineToUSD', () => {
-  it('rounds the unit price UP, then multiplies by quantity', () => {
-    // ceil(8320 / 83.5) × 2 = ceil(99.64) × 2 = 100 × 2 = 200
+  it('rounds the unit price UP to the next $10, then multiplies by quantity', () => {
+    // ceil(8320 / 83.5 / 10) × 10 × 2 = 100 × 2 = 200
     expect(lineToUSD(8320, 2, 83.5)).toBe(200);
   });
 
-  it('equals convertToUSD(unit) × qty (never round of the product)', () => {
+  it('equals unitPriceToUSD(unit) × qty (never round of the product)', () => {
     const unit = 52950, qty = 3, rate = 83.5;
-    expect(lineToUSD(unit, qty, rate)).toBe(convertToUSD(unit, rate) * qty);
+    expect(lineToUSD(unit, qty, rate)).toBe(unitPriceToUSD(unit, rate) * qty);
+    expect(lineToUSD(unit, qty, rate)).toBe(1920);
   });
 
   it('handles zero exchange rate', () => {

@@ -333,7 +333,11 @@ export const useQuoteStore = create<QuoteState>((set) => ({
     project_name: quote.project_name ?? '',
     enquiry_id: quote.enquiry_id ?? '',
     pricing_mode: quote.pricing_mode,
-    agent_commission_pct: Number(quote.commission_pct ?? 0),
+    // commission_pct is stored per quote_product (there is no such column on
+    // `quotes`), so it is restored from the saved products alongside the
+    // margins below. Reading quote.commission_pct always yielded undefined,
+    // which is why a reopened dealer quote showed 0% commission.
+    agent_commission_pct: Number(products[0]?.commission_pct ?? 0),
     pricing_type: quote.pricing_type,
     custom_pricing_title: quote.custom_pricing_title ?? '',
     custom_pricing_price: Number(quote.custom_pricing_price ?? 0),
