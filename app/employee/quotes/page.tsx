@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { FileText, Search, Eye, Plus } from 'lucide-react';
 import Link from 'next/link';
+import type { Quote, Customer } from '@/types';
+
+type QuoteListItem = Quote & { customer: Pick<Customer, 'name' | 'company'> };
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-700',
@@ -19,8 +22,8 @@ const statusColors: Record<string, string> = {
 };
 
 export default function EmployeeQuotesPage() {
-  const supabase = createClient();
-  const [quotes, setQuotes] = useState<any[]>([]);
+  const supabase = useMemo(() => createClient(), []);
+  const [quotes, setQuotes] = useState<QuoteListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
@@ -32,11 +35,13 @@ export default function EmployeeQuotesPage() {
       .select('*, customer:customers(name, company)')
       .eq('created_by', user!.id)
       .order('created_at', { ascending: false });
-    setQuotes(data ?? []);
+    setQuotes((data ?? []) as QuoteListItem[]);
     setLoading(false);
-  }, []);
+  }, [supabase]);
 
-  useEffect(() => { load(); }, [load]);
+  // Deferred to a microtask so the initial fetch's setState calls land after
+  // this effect commits, instead of synchronously cascading a second render.
+  useEffect(() => { queueMicrotask(load); }, [load]);
 
   const filtered = quotes.filter(q =>
     q.quote_number.toLowerCase().includes(search.toLowerCase()) ||

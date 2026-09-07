@@ -51,6 +51,8 @@ export interface Quote {
   created_by: string;
   status: QuoteStatus;
   pricing_mode: PricingMode;
+  project_name: string | null;
+  enquiry_id: string | null;
 
   // Quote-level settings
   validity_days: number;
@@ -63,6 +65,8 @@ export interface Quote {
   pricing_type: PricingType;
   freight_price: number;
   packing_price: number;
+  custom_pricing_title: string | null;
+  custom_pricing_price: number;
   exchange_rate_snapshot: number | null;
   notes: string | null;
 
@@ -101,6 +105,7 @@ export interface QuoteProduct {
   seat_material_id: string | null;
   stem_material_id: string | null;
   cage_material_id: string | null;
+  cage_quantity: number;
   seal_ring_type: string | null;
 
   // Optional toggles

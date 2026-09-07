@@ -13,6 +13,15 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    // components/pdf/** renders PDFs via @react-pdf/renderer's <Image>
+    // primitive, not the DOM <img> element — it has no `alt` prop, so the
+    // web-accessibility rule doesn't apply here.
+    files: ["components/pdf/**/*.tsx"],
+    rules: {
+      "jsx-a11y/alt-text": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

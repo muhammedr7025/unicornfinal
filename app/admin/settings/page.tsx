@@ -1,18 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import { Save, Loader2 } from 'lucide-react';
 import type { StandardMargins, ProjectMargins, ExchangeRate, CompanyInfo } from '@/types';
 
 export default function SettingsPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
 
@@ -27,11 +26,7 @@ export default function SettingsPage() {
     name: 'Unicorn Valves Pvt. Ltd.', address: '', gstin: '',
   });
 
-  useEffect(() => {
-    loadSettings();
-  }, []);
-
-  async function loadSettings() {
+  const loadSettings = useCallback(async () => {
     setLoading(true);
     const { data } = await supabase.from('global_settings').select('*');
     if (data) {
@@ -46,7 +41,11 @@ export default function SettingsPage() {
       });
     }
     setLoading(false);
-  }
+  }, [supabase]);
+
+  // Deferred to a microtask so the fetch's setState calls land after this
+  // effect commits, instead of synchronously cascading a second render.
+  useEffect(() => { queueMicrotask(loadSettings); }, [loadSettings]);
 
   async function saveSetting(key: string, value: unknown) {
     setSaving(key);

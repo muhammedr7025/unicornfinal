@@ -91,13 +91,6 @@ export default function NewQuotePage() {
   const selectedCustomer = customers.find(c => c.id === store.customer_id);
   const isIntl = selectedCustomer?.is_international ?? false;
 
-  useEffect(() => {
-    if (!store.edit_mode) {
-      store.reset();
-    }
-    loadInitialData();
-  }, []);
-
   async function loadInitialData() {
     setLoadingData(true);
     const [custRes, seriesRes, matRes, settingsRes, bwRes, bnwRes, actRes, hwRes, testPresRes, tubePresRes, sealRes, machTypeRes] = await Promise.all([
@@ -157,7 +150,25 @@ export default function NewQuotePage() {
     setLoadingData(false);
   }
 
+  // Runs once on mount only — store.reset()/store.edit_mode are read here
+  // deliberately without being tracked as effect deps, since `store` (the
+  // whole Zustand state) changes on every keystroke in the wizard and
+  // re-running this would wipe the in-progress quote on every edit.
+  useEffect(() => {
+    if (!store.edit_mode) {
+      store.reset();
+    }
+    // Deferred to a microtask so loadInitialData's setState calls land after
+    // this effect commits, instead of synchronously cascading a second render.
+    queueMicrotask(loadInitialData);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Re-apply margins when pricing_mode changes ──
+  // Deliberately keyed on the primitive store.pricing_mode, not the whole
+  // `store` object — `store` changes on every field edit in the wizard, and
+  // depending on it here would re-run setMargins (and reset any margin
+  // override the user made) on every unrelated keystroke.
   useEffect(() => {
     if (globalSettings.length === 0) return; // Not loaded yet
     const marginKey = store.pricing_mode === 'project' ? 'project_margins' : 'standard_margins';
@@ -166,6 +177,7 @@ export default function NewQuotePage() {
       const v = marginSetting.value as { mfg_profit_pct: number; bo_profit_pct: number; neg_margin_pct: number };
       store.setMargins(v);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.pricing_mode, globalSettings]);
 
   async function lookupCosts(productId: string) {
@@ -776,7 +788,7 @@ export default function NewQuotePage() {
         <StepTermsPricing customers={customers} exchangeRate={exchangeRate} onRateChange={setExchangeRate} />
       )}
       {store.currentStep === 4 && (
-        <StepReview customers={customers} saving={saving} onSave={handleSave} exchangeRate={exchangeRate} />
+        <StepReview customers={customers} exchangeRate={exchangeRate} />
       )}
 
       {/* Navigation */}
@@ -1049,7 +1061,7 @@ function StepTermsPricing({ customers, exchangeRate, onRateChange }: { customers
           </div>
           <div className="space-y-2">
             <Label>Notes</Label>
-            <Input value={store.notes} onChange={(e) => store.setQuoteSettings({ notes: e.target.value })} placeholder="Internal notes (not shown on PDF)" />
+            <Input value={store.notes} onChange={(e) => store.setQuoteSettings({ notes: e.target.value })} placeholder="Shown as Special Notes in the Terms & Conditions PDF" />
           </div>
         </CardContent>
       </Card>
@@ -1101,7 +1113,6 @@ function StepProducts({
   const store = useQuoteStore();
   const customer = customers.find(c => c.id === store.customer_id);
   const isIntl = customer?.is_international ?? false;
-  const sym = isIntl ? '$' : '₹';
   const fmt = (v: number) => isIntl
     ? `$${unitPriceToUSD(v, exchangeRate).toLocaleString('en-US')}`
     : `₹${v.toLocaleString('en-IN')}`;
@@ -1732,7 +1743,7 @@ function StepProducts({
                 <Plus className="w-3 h-3" /> Add Item
               </Button>
             </div>
-            {product.accessories.length === 0 && <p className="text-xs text-muted-foreground italic">No accessories. Click "Add Item" to add.</p>}
+            {product.accessories.length === 0 && <p className="text-xs text-muted-foreground italic">No accessories. Click &quot;Add Item&quot; to add.</p>}
             {product.accessories.map((item, ai) => (
               <div key={ai} className="flex items-center gap-2">
                 <Input className="h-8 text-xs flex-1" placeholder="Item name" value={item.item_name} onChange={(e) => {
@@ -2130,7 +2141,7 @@ function StepLineItemsPricing({
 // STEP 5: Review & Save
 // ===================================================================
 
-function StepReview({ customers, saving, onSave, exchangeRate }: { customers: Customer[]; saving: boolean; onSave: () => void; exchangeRate: number }) {
+function StepReview({ customers, exchangeRate }: { customers: Customer[]; exchangeRate: number }) {
 
   const store = useQuoteStore();
   const customer = customers.find(c => c.id === store.customer_id);

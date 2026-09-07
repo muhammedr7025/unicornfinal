@@ -4,6 +4,10 @@ import { renderToBuffer } from '@react-pdf/renderer';
 import { CoverLetterPDF } from '@/components/pdf/CoverLetterPDF';
 import React from 'react';
 
+// @react-pdf/renderer types renderToBuffer's argument as a <Document>-typed
+// element, which CoverLetterPDF's return type doesn't declare.
+type PdfDocument = Parameters<typeof renderToBuffer>[0];
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -75,13 +79,14 @@ export async function GET(
         payment_despatch_pct: Number(quote.payment_despatch_pct),
         warranty_shipment_months: quote.warranty_shipment_months,
         warranty_installation_months: quote.warranty_installation_months,
+        notes: quote.notes ?? undefined,
       },
       customer,
       creator,
       company,
-    }) as any;
+    });
 
-    const pdfBuffer = await renderToBuffer(pdfElement);
+    const pdfBuffer = await renderToBuffer(pdfElement as unknown as PdfDocument);
 
     const filename = quote.quote_number.replace(/\//g, '-');
 

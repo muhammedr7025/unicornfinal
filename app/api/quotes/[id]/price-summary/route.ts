@@ -4,6 +4,10 @@ import { renderToBuffer } from '@react-pdf/renderer';
 import { CompleteQuotePDF } from '@/components/pdf/CompleteQuotePDF';
 import React from 'react';
 
+// @react-pdf/renderer types renderToBuffer's argument as a <Document>-typed
+// element, which CompleteQuotePDF's return type doesn't declare.
+type PdfDocument = Parameters<typeof renderToBuffer>[0];
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -60,7 +64,6 @@ export async function GET(
       email: profile?.email ?? 'sales@unicorn-valves.com',
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const pdfElement = React.createElement(CompleteQuotePDF, {
       quote: {
         quote_number: quote.quote_number,
@@ -82,6 +85,7 @@ export async function GET(
         subtotal_inr: Number(quote.subtotal_inr ?? 0),
         tax_amount_inr: Number(quote.tax_amount_inr ?? 0),
         grand_total_inr: Number(quote.grand_total_inr ?? 0),
+        notes: quote.notes ?? undefined,
       },
       mode: 'price-summary',
       customer,
@@ -96,9 +100,9 @@ export async function GET(
       creator,
       company,
       exchangeRate,
-    }) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    });
 
-    const pdfBuffer = await renderToBuffer(pdfElement);
+    const pdfBuffer = await renderToBuffer(pdfElement as unknown as PdfDocument);
 
     const filename = quote.quote_number.replace(/\//g, '-');
 

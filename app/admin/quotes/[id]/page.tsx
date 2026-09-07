@@ -1,9 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,13 +11,18 @@ import { Download, Loader2, ArrowLeft, FileSpreadsheet, Shield, Truck, CreditCar
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import Link from 'next/link';
 import { use } from 'react';
-import { convertToUSD, lineToUSD } from '@/lib/pricingEngine';
+import type { Quote, QuoteProduct, Customer, Profile } from '@/types';
+
+type QuoteDetail = Quote & {
+  customer: Customer;
+  created_by_profile: Pick<Profile, 'full_name'> | null;
+};
 
 export default function AdminQuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const supabase = createClient();
-  const [quote, setQuote] = useState<any | null>(null);
-  const [products, setProducts] = useState<any[]>([]);
+  const supabase = useMemo(() => createClient(), []);
+  const [quote, setQuote] = useState<QuoteDetail | null>(null);
+  const [products, setProducts] = useState<QuoteProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -31,15 +35,17 @@ export default function AdminQuoteDetailPage({ params }: { params: Promise<{ id:
       supabase.from('quotes').select('*, customer:customers(*), created_by_profile:profiles!quotes_created_by_fkey(full_name)').eq('id', id).single(),
       supabase.from('quote_products').select('*').eq('quote_id', id).order('sort_order'),
     ]);
-    const q = quoteRes.data;
+    const q = quoteRes.data as QuoteDetail | null;
     setQuote(q);
     setProducts(prodRes.data ?? []);
     // Use the rate the quote was saved with, not the current global rate
     setExchangeRate(Number(q?.exchange_rate_snapshot ?? 0));
     setLoading(false);
-  }, [id]);
+  }, [id, supabase]);
 
-  useEffect(() => { load(); }, [load]);
+  // Deferred to a microtask so the initial fetch's setState calls land after
+  // this effect commits, instead of synchronously cascading a second render.
+  useEffect(() => { queueMicrotask(load); }, [load]);
 
   async function updateStatus(newStatus: string) {
     setUpdatingStatus(true);
@@ -143,14 +149,12 @@ export default function AdminQuoteDetailPage({ params }: { params: Promise<{ id:
   const toUSD = (v: number) => exchangeRate > 0 ? v / exchangeRate : 0;
   const fmtUSD = (v: number) => `$${toUSD(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmtUSDRaw = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const fmt = (v: number) => isIntl ? fmtUSD(v) : fmtINR(v);
 
   const productSubtotal = products.reduce((s, p) => s + Number(p.line_total_inr ?? 0), 0);
   const productSubtotalUSD = products.reduce((s, p) => s + toUSD(Number(p.unit_price_inr ?? 0)) * p.quantity, 0);
   const packingPrice = Number(quote.packing_price ?? 0);
   const freightPrice = Number(quote.freight_price ?? 0);
   const customPricingPrice = Number(quote.custom_pricing_price ?? 0);
-  const subtotalINR = Number(quote.subtotal_inr ?? 0);
   const taxINR = Number(quote.tax_amount_inr ?? 0);
   const grandTotalINR = Number(quote.grand_total_inr ?? 0);
 

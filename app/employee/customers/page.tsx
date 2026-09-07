@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -20,7 +20,7 @@ const defaultForm = {
 };
 
 export default function EmployeeCustomersPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -33,9 +33,11 @@ export default function EmployeeCustomersPage() {
     const { data } = await supabase.from('customers').select('*').order('name');
     setCustomers(data ?? []);
     setLoading(false);
-  }, []);
+  }, [supabase]);
 
-  useEffect(() => { loadCustomers(); }, [loadCustomers]);
+  // Deferred to a microtask so the initial fetch's setState calls land after
+  // this effect commits, instead of synchronously cascading a second render.
+  useEffect(() => { queueMicrotask(loadCustomers); }, [loadCustomers]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();

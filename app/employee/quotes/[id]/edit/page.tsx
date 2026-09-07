@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useQuoteStore } from '@/stores/quoteStore';
 import { useRouter } from 'next/navigation';
@@ -19,9 +19,15 @@ import { Loader2 } from 'lucide-react';
  */
 export default function EditQuotePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
-  const store = useQuoteStore();
+  // Selected individually rather than destructured from useQuoteStore() as a
+  // whole — Zustand action functions are stable across renders, but the
+  // store object returned by a selector-less useQuoteStore() is not, which
+  // would make loadQuoteForEdit's useCallback identity change on every
+  // unrelated store update.
+  const loadForEdit = useQuoteStore((s) => s.loadForEdit);
+  const setMargins = useQuoteStore((s) => s.setMargins);
   const [loading, setLoading] = useState(true);
 
   const loadQuoteForEdit = useCallback(async () => {
@@ -85,11 +91,11 @@ export default function EditQuotePage({ params }: { params: Promise<{ id: string
       const margins = marginData?.value as { mfg_profit_pct: number; bo_profit_pct: number; neg_margin_pct: number } | null;
 
       // Load into store
-      store.loadForEdit({ quote, products: enrichedProducts });
+      loadForEdit({ quote, products: enrichedProducts });
 
       // Apply margins
       if (margins) {
-        store.setMargins(margins);
+        setMargins(margins);
       }
 
       setLoading(false);
@@ -99,10 +105,12 @@ export default function EditQuotePage({ params }: { params: Promise<{ id: string
       console.error(err);
       router.push('/employee/quotes');
     }
-  }, [id]);
+  }, [id, router, loadForEdit, setMargins, supabase]);
 
+  // Deferred to a microtask so the fetch's setState calls land after this
+  // effect commits, instead of synchronously cascading a second render.
   useEffect(() => {
-    loadQuoteForEdit();
+    queueMicrotask(loadQuoteForEdit);
   }, [loadQuoteForEdit]);
 
   if (loading) {

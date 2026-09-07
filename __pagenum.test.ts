@@ -1,12 +1,16 @@
 import { it } from 'vitest';
 import { renderToBuffer } from '@react-pdf/renderer';
-import { CompleteQuotePDF } from '@/components/pdf/CompleteQuotePDF';
+import { CompleteQuotePDF, type CompleteQuoteProps } from '@/components/pdf/CompleteQuotePDF';
 import React from 'react';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
-const OUT = 'C:/Users/Awin/AppData/Local/Temp/claude/d--Dev-work-unicornfinal/bf5da013-05d3-44af-936f-813edd28a3b4/scratchpad';
+// Visual-inspection only: dumps rendered PDFs to the OS temp dir so a human
+// can eyeball pagination. Not an assertion-based test.
+const OUT = fs.mkdtempSync(path.join(os.tmpdir(), 'unicornvalves-pagenum-'));
 
-const base = {
+const base: Omit<CompleteQuoteProps, 'products' | 'mode'> = {
   quote: {
     quote_number: 'UC-EN-2526-0700', created_at: new Date().toISOString(),
     enquiry_id: 'ENQ-2026-001', project_name: 'IOCL Paradip', pricing_type: 'ex-works',
@@ -22,22 +26,27 @@ const base = {
   exchangeRate: 83.5,
 };
 
-const mkProducts = (n: number) => Array.from({ length: n }, (_, i) => ({
+const mkProducts = (n: number): CompleteQuoteProps['products'] => Array.from({ length: n }, (_, i) => ({
   sort_order: i, description: `GS Series | ${i + 2}" | ANSI 300 | Flanged RF`,
   quantity: 1, unit_price_inr: 52950, line_total_inr: 52950, tag_number: `FCV-1${i}`,
 }));
 
+// @react-pdf/renderer types renderToBuffer's argument as a <Document>-typed
+// element, which CompleteQuotePDF's return type doesn't declare — the same
+// gap the API routes that render this component work around.
+type PdfDocument = Parameters<typeof renderToBuffer>[0];
+
 it('small quote (fits on one summary page)', async () => {
-  const el = React.createElement(CompleteQuotePDF, { ...base, products: mkProducts(2), mode: 'complete' } as any);
-  fs.writeFileSync(`${OUT}/pn-small.pdf`, await renderToBuffer(el as any));
+  const el = React.createElement(CompleteQuotePDF, { ...base, products: mkProducts(2), mode: 'complete' });
+  fs.writeFileSync(`${OUT}/pn-small.pdf`, await renderToBuffer(el as unknown as PdfDocument));
 }, 60000);
 
 it('large quote (summary overflows to 2 pages)', async () => {
-  const el = React.createElement(CompleteQuotePDF, { ...base, products: mkProducts(30), mode: 'complete' } as any);
-  fs.writeFileSync(`${OUT}/pn-large.pdf`, await renderToBuffer(el as any));
+  const el = React.createElement(CompleteQuotePDF, { ...base, products: mkProducts(30), mode: 'complete' });
+  fs.writeFileSync(`${OUT}/pn-large.pdf`, await renderToBuffer(el as unknown as PdfDocument));
 }, 60000);
 
 it('price-summary mode only', async () => {
-  const el = React.createElement(CompleteQuotePDF, { ...base, products: mkProducts(2), mode: 'price-summary' } as any);
-  fs.writeFileSync(`${OUT}/pn-summary.pdf`, await renderToBuffer(el as any));
+  const el = React.createElement(CompleteQuotePDF, { ...base, products: mkProducts(2), mode: 'price-summary' });
+  fs.writeFileSync(`${OUT}/pn-summary.pdf`, await renderToBuffer(el as unknown as PdfDocument));
 }, 60000);

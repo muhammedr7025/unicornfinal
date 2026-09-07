@@ -72,7 +72,11 @@ export function AppSidebar({ role, userName, userEmail }: AppSidebarProps) {
     return pathname.startsWith(href);
   };
 
-  const SidebarContent = () => (
+  // A plain JSX value, not a nested component function — defining it as a
+  // function here would make React treat it as a new component type on
+  // every render of AppSidebar, remounting the whole sidebar (losing hover/
+  // transition state) any time `collapsed`, `mobileOpen`, or `pathname` changes.
+  const sidebarContent = (
     <>
       {/* Header */}
       <div className="p-4 flex items-center gap-3">
@@ -133,7 +137,7 @@ export function AppSidebar({ role, userName, userEmail }: AppSidebarProps) {
           </div>
           {!collapsed && (
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">{userName}</p>
+              <p className="text-sm font-medium text-white truncate" title={userEmail}>{userName}</p>
               <div className="flex items-center gap-1.5">
                 <Badge
                   variant="outline"
@@ -197,7 +201,7 @@ export function AppSidebar({ role, userName, userEmail }: AppSidebarProps) {
         >
           <X className="w-5 h-5" />
         </button>
-        <SidebarContent />
+        {sidebarContent}
       </aside>
 
       {/* Desktop sidebar */}
@@ -207,7 +211,7 @@ export function AppSidebar({ role, userName, userEmail }: AppSidebarProps) {
           collapsed ? "w-[68px]" : "w-64"
         )}
       >
-        <SidebarContent />
+        {sidebarContent}
       </aside>
     </>
   );

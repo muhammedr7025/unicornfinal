@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 /**
  * Admin-only API route that deletes rows from pricing/master tables.
@@ -10,6 +10,21 @@ import { createServiceClient } from '@/lib/supabase/server';
  */
 export async function POST(request: NextRequest) {
   try {
+    // Verify the requesting user is an admin. The middleware does not cover
+    // this check for API routes under /api/admin/* (its role redirect only
+    // matches pathnames starting with /admin, not /api/admin), and this
+    // route uses the service-role client below, which bypasses RLS entirely
+    // — so without this check any authenticated employee could delete rows
+    // from any whitelisted master pricing table.
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+    if (profile?.role !== 'admin') {
+      return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+    }
+
     const body = await request.json();
     const { table, ids } = body as { table: string; ids: string[] };
 
@@ -30,7 +45,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Table "${table}" is not allowed` }, { status: 403 });
     }
 
-    const supabase = createServiceClient();
+    const serviceClient = createServiceClient();
 
     // Delete in batches of 50 to avoid issues with large IN clauses
     let deleted = 0;
@@ -39,7 +54,7 @@ export async function POST(request: NextRequest) {
 
     for (let i = 0; i < ids.length; i += 50) {
       const batch = ids.slice(i, i + 50);
-      const { error, count } = await supabase
+      const { error } = await serviceClient
         .from(table)
         .delete()
         .in('id', batch);
@@ -47,7 +62,7 @@ export async function POST(request: NextRequest) {
       if (error) {
         // Try one-by-one for this batch
         for (const id of batch) {
-          const { error: singleErr } = await supabase.from(table).delete().eq('id', id);
+          const { error: singleErr } = await serviceClient.from(table).delete().eq('id', id);
           if (singleErr) {
             failed++;
             if (errors.length < 5) errors.push(`${id}: ${singleErr.message}`);

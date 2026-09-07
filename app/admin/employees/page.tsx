@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import { Plus, Loader2, UserCog } from 'lucide-react';
 import type { Profile } from '@/types';
 
 export default function EmployeesPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [employees, setEmployees] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -41,9 +41,11 @@ export default function EmployeesPage() {
       setEmployees(data ?? []);
     }
     setLoading(false);
-  }, []);
+  }, [supabase]);
 
-  useEffect(() => { loadEmployees(); }, [loadEmployees]);
+  // Deferred to a microtask so the initial fetch's setState calls land after
+  // this effect commits, instead of synchronously cascading a second render.
+  useEffect(() => { queueMicrotask(loadEmployees); }, [loadEmployees]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();

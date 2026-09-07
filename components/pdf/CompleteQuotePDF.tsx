@@ -330,7 +330,7 @@ function FooterTC() {
   );
 }
 
-interface CompleteQuoteProps {
+export interface CompleteQuoteProps {
   quote: {
     quote_number: string;
     created_at: string;
@@ -351,6 +351,7 @@ interface CompleteQuoteProps {
     subtotal_inr: number;
     tax_amount_inr: number;
     grand_total_inr: number;
+    notes?: string;
   };
   mode?: 'complete' | 'price-summary' | 'unpriced-summary';
   customer: {
@@ -889,6 +890,13 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
               We trust you will find our offer of interest, and look forward to the receipt of your further instructions, which will receive our immediate attention.
             </Text>
           </View>
+
+          {quote.notes && quote.notes.trim() && (
+            <View style={s.tcSection}>
+              <Text style={s.tcSectionHead}>SPECIAL NOTES</Text>
+              <Text style={s.tcBody}>{quote.notes}</Text>
+            </View>
+          )}
 
           <View style={[s.tcSection, { marginTop: 14 }]}>
             <Text style={[s.tcBody, { fontWeight: 700 }]}>Yours faithfully</Text>

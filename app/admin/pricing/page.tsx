@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -115,8 +115,10 @@ type TabKey = typeof PREVIEW_TABS[number]['key'];
 // Allow accessing .type on cols without TS complaints
 const tabs = PREVIEW_TABS as unknown as TabDef[];
 
+type PreviewRow = Record<string, unknown> & { id: string };
+
 export default function PricingPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [uploading, setUploading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [uploadResult, setUploadResult] = useState<{
@@ -127,13 +129,13 @@ export default function PricingPage() {
 
   // ---- Preview state ----
   const [activeTab, setActiveTab] = useState<TabKey>('materials');
-  const [previewData, setPreviewData] = useState<any[]>([]);
+  const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [searchQ, setSearchQ] = useState('');
 
   // ---- Edit dialog state ----
   const [editOpen, setEditOpen] = useState(false);
-  const [editRow, setEditRow] = useState<any>(null);
+  const [editRow, setEditRow] = useState<PreviewRow | null>(null);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [editSaving, setEditSaving] = useState(false);
 
@@ -150,9 +152,11 @@ export default function PricingPage() {
     if (error) console.error('Preview load error:', error.message);
     setPreviewData(data ?? []);
     setPreviewLoading(false);
-  }, [activeTab]);
+  }, [activeTab, supabase]);
 
-  useEffect(() => { loadPreview(); }, [activeTab]);
+  // Deferred to a microtask so the fetch's setState calls land after this
+  // effect commits, instead of synchronously cascading a second render.
+  useEffect(() => { queueMicrotask(loadPreview); }, [loadPreview]);
 
   function switchTab(tab: TabKey) {
     setActiveTab(tab);
@@ -212,7 +216,7 @@ export default function PricingPage() {
   }
 
   // ---- Inline edit ----
-  function openEdit(row: any) {
+  function openEdit(row: PreviewRow) {
     setEditRow(row);
     const f: Record<string, string> = {};
     for (const col of activeConfig.columns) {
@@ -387,7 +391,7 @@ export default function PricingPage() {
                             ? (row[col.db] ? '✓' : '—')
                             : col.type === 'number'
                             ? Number(row[col.db] ?? 0).toLocaleString('en-IN')
-                            : (row[col.db] ?? '—')}
+                            : (row[col.db] != null ? String(row[col.db]) : '—')}
                         </TableCell>
                       ))}
                       <TableCell className="text-right py-1.5">

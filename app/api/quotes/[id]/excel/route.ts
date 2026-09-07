@@ -95,6 +95,13 @@ export async function GET(
       isIntl,
     );
 
+    // International quotes are priced in USD throughout — every INR amount
+    // in the Quote Summary sheet goes through this before display, mirroring
+    // the currency conversion already applied in the PDF for isIntl quotes.
+    const exRate = Number(quote.exchange_rate_snapshot ?? 83.5);
+    const currencyLabel = isIntl ? 'USD' : 'INR';
+    const displayAmount = (amountINR: number) => isIntl ? convertToUSD(amountINR, exRate) : amountINR;
+
     const wb = XLSX.utils.book_new();
 
     // ── Sheet 1: Quote Summary ──
@@ -121,14 +128,18 @@ export async function GET(
       ['Warranty (Installation)', `${quote.warranty_installation_months} months`],
       [],
       ['PRICE SUMMARY'],
-      ['Products Subtotal (INR)', subtotalProducts],
-      ...(freight > 0 ? [['Freight (INR)', freight]] : []),
-      ['Packing (INR)', packing],
-      ...(quote.pricing_type === 'custom' && quote.custom_pricing_title ? [[quote.custom_pricing_title + ' (INR)', customCharge]] : []),
-      ['Taxable Amount (INR)', taxable],
+      // For international quotes every figure here is converted to USD so
+      // the sheet matches the "Currency: USD ($)" row above — previously
+      // Freight and the custom pricing line stayed in INR while the grand
+      // total alone got a USD figure, mixing currencies in one table.
+      ...(isIntl ? [['Exchange Rate', `1 USD = ₹${exRate}`]] : []),
+      [`Products Subtotal (${currencyLabel})`, displayAmount(subtotalProducts)],
+      ...(freight > 0 ? [[`Freight (${currencyLabel})`, displayAmount(freight)]] : []),
+      [`Packing (${currencyLabel})`, displayAmount(packing)],
+      ...(quote.pricing_type === 'custom' && quote.custom_pricing_title ? [[`${quote.custom_pricing_title} (${currencyLabel})`, displayAmount(customCharge)]] : []),
+      [`Taxable Amount (${currencyLabel})`, displayAmount(taxable)],
       ...(!isIntl ? [['GST 18% (INR)', taxAmount]] : []),
-      ['GRAND TOTAL (INR)', grandTotal],
-      ...(isIntl ? [['Exchange Rate', `1 USD = ₹${quote.exchange_rate_snapshot ?? 83.5}`], ['GRAND TOTAL (USD)', convertToUSD(grandTotal, Number(quote.exchange_rate_snapshot ?? 83.5))]] : []),
+      [`GRAND TOTAL (${currencyLabel})`, displayAmount(grandTotal)],
       [],
       ['Prepared By', profile?.full_name ?? ''],
       ['Phone', profile?.phone ?? ''],

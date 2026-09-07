@@ -3,6 +3,89 @@
 // ============================================================
 
 import { create } from 'zustand';
+import type {
+  PricingMode, PricingType, Customer,
+  ProductTubingItem, ProductTestingItem, ProductAccessory,
+} from '@/types';
+
+// PostgREST serializes Postgres NUMERIC columns as strings (to avoid float
+// precision loss), while INTEGER columns arrive as real numbers — hence the
+// `Number(...)` wrapping around every NUMERIC field throughout this file.
+type Numeric = number | string;
+
+// The subset of a saved quote/product row that loadForEdit actually reads —
+// narrower than the full Quote/QuoteProduct DB shape (which also carries
+// fields like status/created_by that edit mode doesn't need), and matches
+// what a Supabase `select('*')` row provides regardless of which optional
+// columns happen to be null.
+export interface QuoteEditInput {
+  id: string;
+  customer_id: string;
+  customer?: Pick<Customer, 'name'> | null;
+  quote_number: string;
+  project_name?: string | null;
+  enquiry_id?: string | null;
+  pricing_mode: PricingMode;
+  pricing_type: PricingType;
+  custom_pricing_title?: string | null;
+  custom_pricing_price?: Numeric | null;
+  validity_days: number;
+  delivery_text: string;
+  payment_advance_pct: Numeric;
+  payment_approval_pct: Numeric;
+  payment_despatch_pct: Numeric;
+  warranty_shipment_months: number;
+  warranty_installation_months: number;
+  freight_price?: Numeric | null;
+  packing_price?: Numeric | null;
+  notes?: string | null;
+  exchange_rate_snapshot?: Numeric | null;
+}
+
+export interface QuoteProductEditInput {
+  id: string;
+  tag_number?: string | null;
+  quantity: number;
+  series_id: string;
+  description?: string | null;
+  size: string;
+  rating: string;
+  end_connect_type: string;
+  bonnet_type: string;
+  trim_type: string;
+  body_bonnet_material_id?: string | null;
+  plug_material_id?: string | null;
+  seat_material_id?: string | null;
+  stem_material_id?: string | null;
+  cage_material_id?: string | null;
+  cage_quantity?: Numeric | null;
+  seal_ring_type?: string | null;
+  has_pilot_plug?: boolean | null;
+  has_actuator?: boolean | null;
+  actuator_model_id?: string | null;
+  has_handwheel?: boolean | null;
+  handwheel_model_id?: string | null;
+  discount_pct?: Numeric | null;
+  mfg_profit_pct?: Numeric | null;
+  bo_profit_pct?: Numeric | null;
+  neg_margin_pct?: Numeric | null;
+  commission_pct?: Numeric | null;
+  body_cost?: Numeric | null;
+  bonnet_cost?: Numeric | null;
+  plug_cost?: Numeric | null;
+  seat_cost?: Numeric | null;
+  stem_cost?: Numeric | null;
+  cage_cost?: Numeric | null;
+  seal_ring_cost?: Numeric | null;
+  pilot_plug_cost?: Numeric | null;
+  actuator_cost?: Numeric | null;
+  handwheel_cost?: Numeric | null;
+  unit_price_inr?: Numeric | null;
+  line_total_inr?: Numeric | null;
+  tubing_items?: Pick<ProductTubingItem, 'item_name' | 'price' | 'is_preset'>[];
+  testing_items?: Pick<ProductTestingItem, 'item_name' | 'price' | 'is_preset'>[];
+  accessories?: Pick<ProductAccessory, 'item_name' | 'unit_price' | 'quantity'>[];
+}
 
 export interface ProductConfig {
   id: string; // client-side temp id
@@ -183,11 +266,7 @@ interface QuoteState {
   edit_mode: boolean;
   edit_quote_id: string;
   exchange_rate_snapshot: number | null;
-  loadForEdit: (data: {
-    quote: any;
-    products: any[];
-    customItems?: any[];
-  }) => void;
+  loadForEdit: (data: { quote: QuoteEditInput; products: QuoteProductEditInput[] }) => void;
 
   // Reset
   reset: () => void;
@@ -323,7 +402,7 @@ export const useQuoteStore = create<QuoteState>((set) => ({
 
   setMargins: (margins) => set(margins),
 
-  loadForEdit: ({ quote, products, customItems }) => set({
+  loadForEdit: ({ quote, products }) => set({
     edit_mode: true,
     edit_quote_id: quote.id,
     currentStep: 0,
@@ -355,7 +434,7 @@ export const useQuoteStore = create<QuoteState>((set) => ({
     mfg_profit_pct: Number(products[0]?.mfg_profit_pct ?? 25),
     bo_profit_pct: Number(products[0]?.bo_profit_pct ?? 15),
     neg_margin_pct: Number(products[0]?.neg_margin_pct ?? 5),
-    products: products.map((p: any) => ({
+    products: products.map((p) => ({
       id: p.id,
       tag_number: p.tag_number ?? '',
       quantity: p.quantity,
@@ -402,17 +481,17 @@ export const useQuoteStore = create<QuoteState>((set) => ({
       pilot_plug_cost: Number(p.pilot_plug_cost ?? 0),
       actuator_cost: Number(p.actuator_cost ?? 0),
       handwheel_cost: Number(p.handwheel_cost ?? 0),
-      tubing_items: (p.tubing_items ?? []).map((t: any) => ({
+      tubing_items: (p.tubing_items ?? []).map((t) => ({
         item_name: t.item_name,
         price: Number(t.price),
         is_preset: t.is_preset ?? false,
       })),
-      testing_items: (p.testing_items ?? []).map((t: any) => ({
+      testing_items: (p.testing_items ?? []).map((t) => ({
         item_name: t.item_name,
         price: Number(t.price),
         is_preset: t.is_preset ?? false,
       })),
-      accessories: (p.accessories ?? []).map((a: any) => ({
+      accessories: (p.accessories ?? []).map((a) => ({
         item_name: a.item_name,
         unit_price: Number(a.unit_price),
         quantity: a.quantity,

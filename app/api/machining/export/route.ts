@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import * as XLSX from 'xlsx';
 
@@ -6,7 +6,19 @@ import * as XLSX from 'xlsx';
 // Export machining prices as downloadable .xlsx
 // ====================================================
 
-export async function GET(request: NextRequest) {
+interface MachiningPriceExportRow {
+  component: string;
+  series_id: string;
+  size: string;
+  rating: string;
+  type_key: string;
+  material_id: string;
+  fixed_price: number;
+  series: { series_number: string } | null;
+  material: { material_name: string } | null;
+}
+
+export async function GET() {
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -19,7 +31,7 @@ export async function GET(request: NextRequest) {
       .order('component')
       .order('size');
 
-    const sheetData = (rows ?? []).map((r: any) => ({
+    const sheetData = ((rows ?? []) as unknown as MachiningPriceExportRow[]).map((r) => ({
       'Component': r.component,
       'Series Number': r.series?.series_number ?? r.series_id,
       'Size': r.size,

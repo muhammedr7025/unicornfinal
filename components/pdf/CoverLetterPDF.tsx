@@ -91,12 +91,12 @@ const s = StyleSheet.create({
   clProjectRow: { flexDirection: 'row', marginBottom: 12, fontSize: 10 },
   clProjectLabel: { fontWeight: 600, width: 52 },
   clProjectValue: { flex: 1, fontSize: 10 },
-  clBody: { fontSize: 10, lineHeight: 1.5, marginBottom: 8, textAlign: 'justify' as any },
+  clBody: { fontSize: 10, lineHeight: 1.5, marginBottom: 8, textAlign: 'justify' },
   clRefUnderline: { textDecoration: 'underline' },
   clOfferTitle: { fontSize: 10, marginBottom: 6 },
   clListItem: { fontSize: 10, lineHeight: 1.8, paddingLeft: 24, marginBottom: 1 },
-  clTrust: { fontSize: 10, lineHeight: 1.5, marginTop: 8, marginBottom: 8, textAlign: 'justify' as any },
-  clLookForward: { fontSize: 10, lineHeight: 1.5, marginBottom: 16, textAlign: 'justify' as any },
+  clTrust: { fontSize: 10, lineHeight: 1.5, marginTop: 8, marginBottom: 8, textAlign: 'justify' },
+  clLookForward: { fontSize: 10, lineHeight: 1.5, marginBottom: 16, textAlign: 'justify' },
   clThanking: { fontSize: 10, fontWeight: 600, color: colors.red, marginBottom: 12 },
   clSignName: { fontSize: 10, fontWeight: 700, marginBottom: 3 },
   clSignTitle: { fontSize: 10, fontWeight: 700, marginBottom: 3 },
@@ -106,9 +106,9 @@ const s = StyleSheet.create({
   tcTitle: { fontSize: 13, fontWeight: 700, marginTop: 12, marginBottom: 24 },
   tcSectionHead: { fontSize: 10, fontWeight: 700, textDecoration: 'underline', marginBottom: 6, marginTop: 4 },
   tcSubHead: { fontSize: 9.5, fontWeight: 700, textDecoration: 'underline', marginBottom: 4 },
-  tcBody: { fontSize: 9.5, lineHeight: 1.5, marginBottom: 6, textAlign: 'justify' as any },
-  tcBodyBold: { fontSize: 9.5, fontWeight: 700, lineHeight: 1.5, marginBottom: 6, textAlign: 'justify' as any },
-  tcIndent: { fontSize: 9.5, lineHeight: 1.5, marginBottom: 2, paddingLeft: 20, textAlign: 'justify' as any },
+  tcBody: { fontSize: 9.5, lineHeight: 1.5, marginBottom: 6, textAlign: 'justify' },
+  tcBodyBold: { fontSize: 9.5, fontWeight: 700, lineHeight: 1.5, marginBottom: 6, textAlign: 'justify' },
+  tcIndent: { fontSize: 9.5, lineHeight: 1.5, marginBottom: 2, paddingLeft: 20, textAlign: 'justify' },
   tcIndentBold: { fontSize: 9.5, fontWeight: 700, lineHeight: 1.5, marginBottom: 2, paddingLeft: 20 },
   tcBullet: { fontSize: 9.5, lineHeight: 1.5, marginBottom: 1, paddingLeft: 8 },
   tcSection: { marginBottom: 10 },
@@ -173,7 +173,7 @@ function Header() {
 }
 
 /* ── Props ── */
-interface CoverLetterPDFProps {
+export interface CoverLetterPDFProps {
   quote: {
     quote_number: string;
     created_at: string;
@@ -187,6 +187,7 @@ interface CoverLetterPDFProps {
     payment_despatch_pct: number;
     warranty_shipment_months: number;
     warranty_installation_months: number;
+    notes?: string;
   };
   customer: {
     name: string;
@@ -366,7 +367,7 @@ export function CoverLetterPDF({ quote, customer, creator, company }: CoverLette
         <View style={s.tcSection}>
           <Text style={s.tcSubHead}>Inspection</Text>
           <Text style={s.tcBody}>
-            All goods will undergo sellers standard quality control inspection and testing procedures, before release from factory. Any additional tests and / or inspection requirements will be at buyer's cost and will need to be communicated and agreed at the time of order.
+            All goods will undergo sellers standard quality control inspection and testing procedures, before release from factory. Any additional tests and / or inspection requirements will be at buyer&apos;s cost and will need to be communicated and agreed at the time of order.
           </Text>
         </View>
 
@@ -390,7 +391,7 @@ export function CoverLetterPDF({ quote, customer, creator, company }: CoverLette
         <View style={s.tcSection}>
           <Text style={s.tcSubHead}>Freight / Transportation</Text>
           <Text style={s.tcBody}>
-            Unless otherwise stated, the ex-works price does not include dispatch, freight, or insurance charges. These will be at buyer's cost. For F.O.R./C.I.F. quotes, freight charges are included as part of the quoted price.
+            Unless otherwise stated, the ex-works price does not include dispatch, freight, or insurance charges. These will be at buyer&apos;s cost. For F.O.R./C.I.F. quotes, freight charges are included as part of the quoted price.
           </Text>
         </View>
 
@@ -412,7 +413,7 @@ export function CoverLetterPDF({ quote, customer, creator, company }: CoverLette
         <View style={s.tcSection}>
           <Text style={s.tcSubHead}>Limitation of Liability</Text>
           <Text style={s.tcBody}>
-            In no event shall the Seller be liable for any indirect, incidental, consequential, special, or punitive damages, including but not limited to loss of profits, loss of production, loss of use, arising out of or related to the products or services provided. Seller's total liability shall not exceed the purchase price of the goods/services.
+            In no event shall the Seller be liable for any indirect, incidental, consequential, special, or punitive damages, including but not limited to loss of profits, loss of production, loss of use, arising out of or related to the products or services provided. Seller&apos;s total liability shall not exceed the purchase price of the goods/services.
           </Text>
         </View>
 
@@ -518,9 +519,17 @@ export function CoverLetterPDF({ quote, customer, creator, company }: CoverLette
           </Text>
         </View>
 
+        {/* Special Notes — only rendered when the quote has one */}
+        {quote.notes && quote.notes.trim() && (
+          <View style={s.tcSection}>
+            <Text style={s.tcSectionHead}>SPECIAL NOTES</Text>
+            <Text style={s.tcBody}>{quote.notes}</Text>
+          </View>
+        )}
+
         {/* Signature block */}
         <View style={{ marginTop: 28, borderTopWidth: 0.5, borderTopColor: colors.border, paddingTop: 14 }}>
-          <Text style={[s.tcBody, { fontWeight: 700 }]}>For UNICORN VALVES PRIVATE LIMITED</Text>
+          <Text style={[s.tcBody, { fontWeight: 700 }]}>For {(company.name || 'Unicorn Valves Private Limited').toUpperCase()}</Text>
           <Text style={s.tcBody}>{'\n'}{'\n'}</Text>
           <Text style={[s.tcBody, { fontWeight: 600 }]}>Authorized Signatory</Text>
         </View>

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -21,7 +21,7 @@ const statusColors: Record<string, string> = {
 };
 
 export default function AdminQuotesPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -41,9 +41,11 @@ export default function AdminQuotesPage() {
     const { data, error } = await query;
     if (!error) setQuotes((data ?? []) as Quote[]);
     setLoading(false);
-  }, [statusFilter]);
+  }, [statusFilter, supabase]);
 
-  useEffect(() => { loadQuotes(); }, [loadQuotes]);
+  // Deferred to a microtask so the fetch's setState calls land after this
+  // effect commits, instead of synchronously cascading a second render.
+  useEffect(() => { queueMicrotask(loadQuotes); }, [loadQuotes]);
 
   const filtered = quotes.filter(q =>
     q.quote_number.toLowerCase().includes(search.toLowerCase()) ||

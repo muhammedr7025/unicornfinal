@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -31,7 +31,7 @@ interface MachiningPrice {
 const COMPONENTS = ['body', 'bonnet', 'plug', 'seat', 'stem', 'cage'];
 
 export default function MachinePricingPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [prices, setPrices] = useState<MachiningPrice[]>([]);
   const [series, setSeries] = useState<Array<{ id: string; series_number: string; series_name: string }>>([]);
   const [materials, setMaterials] = useState<Array<{ id: string; material_name: string; material_group: string }>>([]);
@@ -64,9 +64,11 @@ export default function MachinePricingPage() {
     setSeries(seriesRes.data ?? []);
     setMaterials(matRes.data ?? []);
     setLoading(false);
-  }, []);
+  }, [supabase]);
 
-  useEffect(() => { load(); }, [load]);
+  // Deferred to a microtask so the initial fetch's setState calls land after
+  // this effect commits, instead of synchronously cascading a second render.
+  useEffect(() => { queueMicrotask(load); }, [load]);
 
   function openAdd() {
     setEditing(null);
@@ -241,7 +243,7 @@ export default function MachinePricingPage() {
             {uploadResult.errors && uploadResult.errors.length > 0 && (
               <ul className="mt-2 text-xs space-y-1 max-h-40 overflow-y-auto">
                 {uploadResult.errors.slice(0, 20).map((err, i) => (
-                  <li key={i}>Row {err.row}, "{err.column}": {err.error}</li>
+                  <li key={i}>Row {err.row}, &quot;{err.column}&quot;: {err.error}</li>
                 ))}
                 {uploadResult.errors.length > 20 && <li>...and {uploadResult.errors.length - 20} more</li>}
               </ul>

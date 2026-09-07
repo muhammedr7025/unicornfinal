@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { toast } from 'sonner';
@@ -32,7 +32,7 @@ const defaultForm: CustomerFormState = {
 };
 
 export default function CustomersPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -51,9 +51,11 @@ export default function CustomersPage() {
     if (error) toast.error('Failed to load customers');
     else setCustomers(data ?? []);
     setLoading(false);
-  }, []);
+  }, [supabase]);
 
-  useEffect(() => { loadCustomers(); }, [loadCustomers]);
+  // Deferred to a microtask so the initial fetch's setState calls land after
+  // this effect commits, instead of synchronously cascading a second render.
+  useEffect(() => { queueMicrotask(loadCustomers); }, [loadCustomers]);
 
   function openEdit(cust: Customer) {
     setEditing(cust);

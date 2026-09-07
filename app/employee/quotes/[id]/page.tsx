@@ -1,9 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { toast } from 'sonner';
@@ -12,12 +11,15 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import Link from 'next/link';
 import { use } from 'react';
 import { convertToUSD, unitPriceToUSD, lineToUSD, roundUpRupee } from '@/lib/pricingEngine';
+import type { Quote, QuoteProduct, Customer } from '@/types';
+
+type QuoteDetail = Quote & { customer: Customer };
 
 export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const supabase = createClient();
-  const [quote, setQuote] = useState<any | null>(null);
-  const [products, setProducts] = useState<any[]>([]);
+  const supabase = useMemo(() => createClient(), []);
+  const [quote, setQuote] = useState<QuoteDetail | null>(null);
+  const [products, setProducts] = useState<QuoteProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [downloadingExcel, setDownloadingExcel] = useState(false);
@@ -30,7 +32,7 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
       supabase.from('quotes').select('*, customer:customers(*)').eq('id', id).single(),
       supabase.from('quote_products').select('*').eq('quote_id', id).order('sort_order'),
     ]);
-    const q = quoteRes.data;
+    const q = quoteRes.data as QuoteDetail | null;
     setQuote(q);
     setProducts(prodRes.data ?? []);
     // Use the rate the quote was saved with, not the current global rate
@@ -42,9 +44,11 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
       setCreatorName(profile?.full_name ?? 'Unknown');
     }
     setLoading(false);
-  }, [id]);
+  }, [id, supabase]);
 
-  useEffect(() => { load(); }, [load]);
+  // Deferred to a microtask so the initial fetch's setState calls land after
+  // this effect commits, instead of synchronously cascading a second render.
+  useEffect(() => { queueMicrotask(load); }, [load]);
 
   async function downloadPdf() {
     setDownloadingPdf(true);
@@ -142,14 +146,12 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
   const fmtUSD = (v: number) => `$${convertToUSD(v, exchangeRate).toLocaleString('en-US')}`;
   const fmtUnitUSD = (v: number) => `$${unitPriceToUSD(v, exchangeRate).toLocaleString('en-US')}`;
   const fmtUSDRaw = (v: number) => `$${Math.ceil(v).toLocaleString('en-US')}`;
-  const fmt = (v: number) => isIntl ? fmtUSD(v) : fmtINR(v);
 
   const productSubtotal = products.reduce((s, p) => s + Number(p.line_total_inr ?? 0), 0);
   const productSubtotalUSD = products.reduce((s, p) => s + lineToUSD(Number(p.unit_price_inr ?? 0), p.quantity, exchangeRate), 0);
   const packingPrice = Number(quote.packing_price ?? 0);
   const freightPrice = Number(quote.freight_price ?? 0);
   const customPricingPrice = Number(quote.custom_pricing_price ?? 0);
-  const subtotalINR = Number(quote.subtotal_inr ?? 0);
   const taxINR = Number(quote.tax_amount_inr ?? 0);
   const grandTotalINR = Number(quote.grand_total_inr ?? 0);
 
