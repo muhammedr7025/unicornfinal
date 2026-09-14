@@ -146,7 +146,8 @@ export default function AdminQuoteDetailPage({ params }: { params: Promise<{ id:
   const customer = quote.customer as { name: string; company?: string; country: string; is_international: boolean };
   const creator = quote.created_by_profile as { full_name: string } | null;
   const isIntl = customer.is_international;
-  const fmtINR = (v: number) => `₹${v.toLocaleString('en-IN')}`;
+  // Two decimals are display precision only — the values themselves are exact.
+  const fmtINR = (v: number) => `₹${v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const toUSD = (v: number) => exchangeRate > 0 ? v / exchangeRate : 0;
   const fmtUSD = (v: number) => `$${toUSD(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmtUSDRaw = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

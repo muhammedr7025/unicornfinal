@@ -159,10 +159,10 @@ export function QuotePDF({ quote, customer, products, company, exchangeRate }: Q
   const isIntl = customer.is_international;
   const formatCurrency = (v: number) => {
     if (isIntl) {
-      const usd = exchangeRate > 0 ? Math.round(v / exchangeRate) : 0;
-      return `$${usd.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+      const usd = exchangeRate > 0 ? v / exchangeRate : 0;
+      return `$${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
-    return `\u20B9${v.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+    return `\u20B9${v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   const sortedProducts = [...products].sort((a, b) => a.sort_order - b.sort_order);

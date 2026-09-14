@@ -10,7 +10,7 @@ import { Download, Loader2, ArrowLeft, FileSpreadsheet, Shield, Truck, CreditCar
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import Link from 'next/link';
 import { use } from 'react';
-import { convertToUSD, unitPriceToUSD, lineToUSD, roundUpRupee } from '@/lib/pricingEngine';
+import { convertToUSD, lineToUSD } from '@/lib/pricingEngine';
 import { formatDeliveryText } from '@/lib/quoteHelpers';
 import type { Quote, QuoteProduct, Customer } from '@/types';
 
@@ -136,17 +136,13 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
 
   const customer = quote.customer as { name: string; company?: string; country: string; is_international: boolean };
   const isIntl = customer.is_international;
-  // Currency: INR whole rupees, USD rounded UP to whole dollars (matches the
-  // wizard and the PDF via the canonical pricing-engine helpers).
-  // INR rounds UP to the next whole rupee; a quoted USD unit price rounds UP to
-  // the next $10 (the dollar mirror of the ₹10 rule), while quote-level charges
-  // — packing, freight, custom items, GST — round up to the next whole dollar,
-  // exactly as they carry no ₹10 rounding in INR.
-  const fmtINR = (v: number) => `₹${roundUpRupee(v).toLocaleString('en-IN')}`;
+  // Amounts are shown exactly as calculated — the two decimals below are
+  // display precision only, nothing is rounded to a rupee, ₹10 or a dollar.
+  const money2 = { minimumFractionDigits: 2, maximumFractionDigits: 2 } as const;
+  const fmtINR = (v: number) => `₹${v.toLocaleString('en-IN', money2)}`;
   const toUSD = (v: number) => convertToUSD(v, exchangeRate);
-  const fmtUSD = (v: number) => `$${convertToUSD(v, exchangeRate).toLocaleString('en-US')}`;
-  const fmtUnitUSD = (v: number) => `$${unitPriceToUSD(v, exchangeRate).toLocaleString('en-US')}`;
-  const fmtUSDRaw = (v: number) => `$${Math.ceil(v).toLocaleString('en-US')}`;
+  const fmtUSD = (v: number) => `$${toUSD(v).toLocaleString('en-US', money2)}`;
+  const fmtUSDRaw = (v: number) => `$${v.toLocaleString('en-US', money2)}`;
 
   const productSubtotal = products.reduce((s, p) => s + Number(p.line_total_inr ?? 0), 0);
   const productSubtotalUSD = products.reduce((s, p) => s + lineToUSD(Number(p.unit_price_inr ?? 0), p.quantity, exchangeRate), 0);
@@ -351,7 +347,7 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
                         <TableCell>
                           <p className="text-sm font-medium">{p.description || `${p.size} | ${p.rating} | ${p.end_connect_type}`}</p>
                         </TableCell>
-                        {isIntl && <TableCell className="text-right text-blue-600 dark:text-blue-400 font-semibold">{fmtUnitUSD(unitINR)}</TableCell>}
+                        {isIntl && <TableCell className="text-right text-blue-600 dark:text-blue-400 font-semibold">{fmtUSD(unitINR)}</TableCell>}
                         <TableCell className="text-right font-semibold">{fmtINR(unitINR)}</TableCell>
                         <TableCell className="text-center">{p.quantity}</TableCell>
                         {isIntl && <TableCell className="text-right text-blue-600 dark:text-blue-400 font-semibold">{fmtUSDRaw(lineToUSD(unitINR, p.quantity, exchangeRate))}</TableCell>}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import * as XLSX from 'xlsx';
-import { calculateQuoteTotal, convertToUSD, roundToNearest10, roundUpRupee } from '@/lib/pricingEngine';
+import { calculateQuoteTotal, convertToUSD } from '@/lib/pricingEngine';
 
 export async function GET(
   request: NextRequest,
@@ -77,7 +77,6 @@ export async function GET(
     };
 
     const applyMargin = (cost: number, pct: number) => (cost <= 0 || pct >= 100) ? cost : cost / (1 - pct / 100);
-    const r10 = roundToNearest10;
 
     const isIntl = customer.is_international;
     const subtotalProducts = productList.reduce((s, p) => s + Number(p.line_total_inr ?? 0), 0);
@@ -255,10 +254,9 @@ export async function GET(
       const afterNeg = applyMargin(unitCost, negMarginPct);
       const afterComm = commPct > 0 ? applyMargin(afterNeg, commPct) : afterNeg;
       const afterDisc = discPct > 0 ? afterComm * (1 - discPct / 100) : afterComm;
-      const unitPrice = r10(afterDisc);
-      const lineTotal = r10(unitPrice * qty);
+      const unitPrice = afterDisc;
+      const lineTotal = unitPrice * qty;
 
-      const INR = roundUpRupee;
       const sheetData: (string | number | null)[][] = [
         [`PRODUCT ${i + 1} — COST BREAKDOWN`],
         [`Quote: ${quote.quote_number}  |  Customer: ${customer.name}`],
@@ -269,7 +267,7 @@ export async function GET(
       ];
 
       const row = (comp: string, mat: string, wt: number | null, rate: number, matCost: number | null, mach: number, total: number, note = '') =>
-        [comp, mat, wt ?? '—', rate || '—', matCost != null ? INR(matCost) : '—', mach || '—', INR(total), note];
+        [comp, mat, wt ?? '—', rate || '—', matCost ?? '—', mach || '—', total, note];
 
       sheetData.push(row('Body', bbMat?.material_name ?? 'N/A', bodyW, bbRate, bodyW != null ? bodyW * bbRate : null, bodyMach, bodyCost));
       sheetData.push(row('Bonnet', bbMat?.material_name ?? 'N/A', bonnetW, bbRate, bonnetW != null ? bonnetW * bbRate : null, bonnetMach, bonnetCost));
@@ -282,61 +280,50 @@ export async function GET(
         sheetData.push(row(`Cage (×${cageQty})`, cageMat.material_name, cageW != null ? cageW * cageQty : null, cageRate, cageMatCost, cageMach * cageQty, cageCost, `Qty ${cageQty} cage(s)`));
       }
       if (sealPrice > 0 || sealCost > 0) {
-        sheetData.push(['Seal Ring', p.seal_ring_type ?? 'N/A', '—', '—', INR(sealPrice || sealCost), '—', INR(sealCost), 'Fixed price']);
+        sheetData.push(['Seal Ring', p.seal_ring_type ?? 'N/A', '—', '—', sealPrice || sealCost, '—', sealCost, 'Fixed price']);
       }
       if (p.has_pilot_plug) {
         const ppRate = plugMat ? Number(plugMat.price_per_kg) : 0;
         sheetData.push(row('Pilot Plug', plugMat?.material_name ?? 'N/A', pilotW, ppRate, pilotW != null ? pilotW * ppRate : null, 0, pilotCost));
       }
       if (p.has_actuator && actCost > 0) {
-        sheetData.push(['Actuator', act ? `${act.type} — ${act.model}` : 'N/A', '—', '—', '—', '—', INR(actCost), 'Bought-out']);
+        sheetData.push(['Actuator', act ? `${act.type} — ${act.model}` : 'N/A', '—', '—', '—', '—', actCost, 'Bought-out']);
       }
       if (p.has_handwheel && hwCost > 0) {
-        sheetData.push(['Handwheel', hw ? `${hw.type} — ${hw.model}` : 'N/A', '—', '—', '—', '—', INR(hwCost), 'Bought-out']);
+        sheetData.push(['Handwheel', hw ? `${hw.type} — ${hw.model}` : 'N/A', '—', '—', '—', '—', hwCost, 'Bought-out']);
       }
       for (const t of pTesting as { item_name: string; price: number | string }[]) {
-        sheetData.push(['Testing', t.item_name, '—', '—', '—', '—', INR(Number(t.price)), 'Fixed price']);
+        sheetData.push(['Testing', t.item_name, '—', '—', '—', '—', Number(t.price), 'Fixed price']);
       }
       for (const t of pTubing as { item_name: string; price: number | string }[]) {
-        sheetData.push(['Tubing / Fitting', t.item_name, '—', '—', '—', '—', INR(Number(t.price)), 'Fixed price']);
+        sheetData.push(['Tubing / Fitting', t.item_name, '—', '—', '—', '—', Number(t.price), 'Fixed price']);
       }
       for (const a of pAcc as { item_name: string; unit_price: number | string; quantity: number }[]) {
-        sheetData.push([`Accessory — ${a.item_name}`, `×${a.quantity}`, '—', '—', INR(Number(a.unit_price)), '—', INR(Number(a.unit_price) * a.quantity), 'Bought-out']);
+        sheetData.push([`Accessory — ${a.item_name}`, `×${a.quantity}`, '—', '—', Number(a.unit_price), '—', Number(a.unit_price) * a.quantity, 'Bought-out']);
       }
 
       sheetData.push([]);
-      // Each running total is rounded UP to the whole rupee, and every step
-      // amount is the difference between two rounded totals — so the column
-      // adds up exactly, and no step (commission and discount especially) is
-      // ever shown a rupee light the way Math.round() used to show it.
-      const chainMfgCost = INR(mfgCost);
-      const chainMfgWithProfit = INR(mfgWithProfit);
-      const chainBoCost = INR(boCost);
-      const chainBoWithProfit = INR(boWithProfit);
-      const chainUnitCost = INR(unitCost);
-      const chainAfterNeg = INR(afterNeg);
-      const chainAfterComm = INR(afterComm);
-      const chainAfterDisc = INR(afterDisc);
-
+      // Exact values throughout — each step amount is the true difference
+      // between two exact running totals, so the column adds up by definition.
       sheetData.push(['PRICING CHAIN', '', '', '', '', '', '(₹)']);
-      sheetData.push(['Manufacturing Cost (body+bonnet+plug+seat+stem+cage+seal+pilot+testing+tubing+act+hw)', '', '', '', '', '', chainMfgCost]);
-      sheetData.push([`Mfg Profit (${mfgProfitPct}% margin-on-price)`, '', '', '', '', '', chainMfgWithProfit - chainMfgCost]);
-      sheetData.push(['Mfg Cost After Profit', '', '', '', '', '', chainMfgWithProfit]);
-      sheetData.push(['Bought-out Cost (accessories)', '', '', '', '', '', chainBoCost]);
-      sheetData.push([`BO Profit (${boProfitPct}% margin-on-price)`, '', '', '', '', '', chainBoWithProfit - chainBoCost]);
-      sheetData.push(['Unit Cost (Mfg + BO)', '', '', '', '', '', chainUnitCost]);
-      sheetData.push([`Negotiation Margin (${negMarginPct}%)`, '', '', '', '', '', chainAfterNeg - chainUnitCost]);
-      sheetData.push(['After Negotiation Margin', '', '', '', '', '', chainAfterNeg]);
+      sheetData.push(['Manufacturing Cost (body+bonnet+plug+seat+stem+cage+seal+pilot+testing+tubing+act+hw)', '', '', '', '', '', mfgCost]);
+      sheetData.push([`Mfg Profit (${mfgProfitPct}% margin-on-price)`, '', '', '', '', '', mfgWithProfit - mfgCost]);
+      sheetData.push(['Mfg Cost After Profit', '', '', '', '', '', mfgWithProfit]);
+      sheetData.push(['Bought-out Cost (accessories)', '', '', '', '', '', boCost]);
+      sheetData.push([`BO Profit (${boProfitPct}% margin-on-price)`, '', '', '', '', '', boWithProfit - boCost]);
+      sheetData.push(['Unit Cost (Mfg + BO)', '', '', '', '', '', unitCost]);
+      sheetData.push([`Negotiation Margin (${negMarginPct}%)`, '', '', '', '', '', afterNeg - unitCost]);
+      sheetData.push(['After Negotiation Margin', '', '', '', '', '', afterNeg]);
       if (commPct > 0) {
-        sheetData.push([`Agent Commission (${commPct}%)`, '', '', '', '', '', chainAfterComm - chainAfterNeg]);
-        sheetData.push(['After Commission', '', '', '', '', '', chainAfterComm]);
+        sheetData.push([`Agent Commission (${commPct}%)`, '', '', '', '', '', afterComm - afterNeg]);
+        sheetData.push(['After Commission', '', '', '', '', '', afterComm]);
       }
       if (discPct > 0) {
-        sheetData.push([`Discount (${discPct}%)`, '', '', '', '', '', chainAfterDisc - chainAfterComm]);
-        sheetData.push(['After Discount', '', '', '', '', '', chainAfterDisc]);
+        sheetData.push([`Discount (${discPct}%)`, '', '', '', '', '', afterDisc - afterComm]);
+        sheetData.push(['After Discount', '', '', '', '', '', afterDisc]);
       }
-      sheetData.push([`⭐ UNIT PRICE (rounded to ₹10)`, '', '', '', '', '', unitPrice]);
-      sheetData.push([`LINE TOTAL (×${qty} qty, rounded to ₹10)`, '', '', '', '', '', lineTotal]);
+      sheetData.push([`⭐ UNIT PRICE`, '', '', '', '', '', unitPrice]);
+      sheetData.push([`LINE TOTAL (×${qty} qty)`, '', '', '', '', '', lineTotal]);
 
       const prodSheet = XLSX.utils.aoa_to_sheet(sheetData);
       prodSheet['!cols'] = [{ wch: 55 }, { wch: 22 }, { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 25 }];

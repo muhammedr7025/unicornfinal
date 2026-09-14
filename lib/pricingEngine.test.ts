@@ -8,74 +8,21 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  roundToNearest10,
-  roundUpRupee,
   calculateWeightBasedCost,
   calculateFixedComponentCost,
   calculateProductPrice,
   calculateQuoteTotal,
   convertToUSD,
-  unitPriceToUSD,
   lineToUSD,
 } from './pricingEngine';
 import type { ComponentCosts, PricingParams } from '@/types';
 
 // ============================================================
-// §5.2 — Rounding Rule
+// No rounding — the engine returns exact arithmetic
 // ============================================================
-
-describe('roundToNearest10', () => {
-  it('rounds up exact multiples to themselves', () => {
-    expect(roundToNearest10(100)).toBe(100);
-    expect(roundToNearest10(50860)).toBe(50860);
-    expect(roundToNearest10(0)).toBe(0);
-  });
-
-  it('rounds up non-multiples to next ₹10', () => {
-    expect(roundToNearest10(101)).toBe(110);
-    expect(roundToNearest10(50851)).toBe(50860);
-    expect(roundToNearest10(50856.38)).toBe(50860);
-    expect(roundToNearest10(1)).toBe(10);
-    expect(roundToNearest10(9.99)).toBe(10);
-    expect(roundToNearest10(10.01)).toBe(20);
-  });
-
-  it('handles negative values', () => {
-    // Math.ceil(-5/10) * 10 produces -0, which is fine (treated as 0 in all arithmetic)
-    const result = roundToNearest10(-5);
-    expect(result + 0).toBe(0); // -0 + 0 = 0
-    expect(result >= 0).toBe(true);
-  });
-
-  it('never overshoots because of binary floating-point dust', () => {
-    // 0.1 + 0.2 === 0.30000000000000004; scaled up, dust like this used to
-    // push an exact multiple of 10 to the NEXT multiple.
-    expect(roundToNearest10(1000 * (0.1 + 0.2) * 100)).toBe(30000);
-    expect(roundToNearest10(50310.000000000007)).toBe(50310);
-  });
-});
-
-// Every rupee figure we show or store rounds UP to the next whole rupee —
-// never to the nearest, never down.
-describe('roundUpRupee', () => {
-  it('leaves whole rupees alone', () => {
-    expect(roundUpRupee(14555)).toBe(14555);
-    expect(roundUpRupee(0)).toBe(0);
-  });
-
-  it('rounds a fraction below .5 UP (Math.round would round it down)', () => {
-    expect(roundUpRupee(22222.08)).toBe(22223);
-    expect(roundUpRupee(52947.01)).toBe(52948);
-  });
-
-  it('rounds a fraction above .5 up too', () => {
-    expect(roundUpRupee(14554.8)).toBe(14555);
-  });
-
-  it('ignores floating-point dust on exact rupees', () => {
-    expect(roundUpRupee(9000.0000000000018)).toBe(9000);
-  });
-});
+// The ₹10 unit-price ceiling, the whole-rupee GST ceiling and the
+// $10/whole-dollar USD ceilings were removed. Every figure below is the
+// exact result; presentation decides how many decimals to show.
 
 // ============================================================
 // Component Cost Calculations (§5.3 Step 1)
@@ -194,24 +141,30 @@ describe('calculateProductPrice — Worked Example §5.4', () => {
     expect(result.afterDiscount).toBeCloseTo(52947.89, 0);
   });
 
-  it('produces correct unitPrice rounded (Step 9b)', () => {
+  it('produces an exact unitPrice — not rounded to ₹10 (Step 9b)', () => {
     const result = calculateProductPrice(costs, params);
-    // ceil(52947.887 / 10) × 10 = 52950
-    expect(result.unitPrice).toBe(52950);
+    // 52947.8867... stays as-is; the old rule pushed this up to 52950.
+    expect(result.unitPrice).toBeCloseTo(52947.89, 2);
+    expect(result.unitPrice).toBe(result.afterDiscount);
   });
 
-  it('produces correct lineTotal (Step 10)', () => {
+  it('produces an exact lineTotal — not rounded to ₹10 (Step 10)', () => {
     const result = calculateProductPrice(costs, params);
-    // ceil(52950 × 3 / 10) × 10 = ceil(158850 / 10) × 10 = 158850
-    expect(result.lineTotal).toBe(158850);
+    // 52947.8867... × 3; the old rule gave 158850.
+    expect(result.lineTotal).toBeCloseTo(158843.66, 2);
+  });
+
+  it('keeps lineTotal exactly equal to unitPrice × quantity', () => {
+    const result = calculateProductPrice(costs, params);
+    expect(result.lineTotal).toBe(result.unitPrice * params.quantity);
   });
 
   it('passes the full worked example end-to-end', () => {
     const result = calculateProductPrice(costs, params);
     expect(result.mfgCost).toBe(28681);
     expect(result.boCost).toBe(8000);
-    expect(result.unitPrice).toBe(52950);
-    expect(result.lineTotal).toBe(158850);
+    expect(result.unitPrice).toBeCloseTo(52947.89, 2);
+    expect(result.lineTotal).toBeCloseTo(158843.66, 2);
   });
 });
 
@@ -322,16 +275,16 @@ describe('calculateQuoteTotal', () => {
     const result = calculateQuoteTotal(products, 'ex-works', 0, [], 0, false);
     expect(result.productSubtotal).toBe(80860);
     expect(result.subtotal).toBe(80860);
-    // GST rounded UP to whole rupees (no paise)
-    expect(result.taxAmount).toBe(roundUpRupee(80860 * 0.18));
-    expect(result.grandTotal).toBe(80860 + roundUpRupee(80860 * 0.18));
+    // GST is exact — paise are kept, not rounded up to a whole rupee
+    expect(result.taxAmount).toBeCloseTo(14554.8, 2);
+    expect(result.grandTotal).toBeCloseTo(80860 + 14554.8, 2);
   });
 
   it('calculates for-site with freight', () => {
     const products = [{ lineTotal: 50000 }];
     const result = calculateQuoteTotal(products, 'for-site', 5000, [], 2000, false);
     expect(result.subtotal).toBe(50000 + 5000 + 2000); // 57000
-    expect(result.taxAmount).toBe(roundUpRupee(57000 * 0.18));
+    expect(result.taxAmount).toBeCloseTo(10260, 2);
   });
 
   it('ignores freight for ex-works', () => {
@@ -363,23 +316,23 @@ describe('calculateQuoteTotal', () => {
     expect(result.subtotal).toBe(51500);
   });
 
-  it('rounds GST UP to the next whole rupee when the paise are below .50', () => {
-    // 123456 x 18% = 22222.08 -> Math.round gives 22222 (DOWN). Must be 22223.
+  it('keeps GST paise below .50 exactly (no rounding up to a whole rupee)', () => {
+    // 123456 x 18% = 22222.08 — stays 22222.08, not 22223
     const result = calculateQuoteTotal([{ lineTotal: 123456 }], 'ex-works', 0, [], 0, false);
-    expect(result.taxAmount).toBe(22223);
-    expect(result.grandTotal).toBe(123456 + 22223);
+    expect(result.taxAmount).toBeCloseTo(22222.08, 2);
+    expect(result.grandTotal).toBeCloseTo(123456 + 22222.08, 2);
   });
 
-  it('rounds GST UP when the paise are above .50 as well', () => {
-    // 80860 x 18% = 14554.80 -> 14555
+  it('keeps GST paise above .50 exactly too', () => {
+    // 80860 x 18% = 14554.80 — stays 14554.80, not 14555
     const result = calculateQuoteTotal([{ lineTotal: 80860 }], 'ex-works', 0, [], 0, false);
-    expect(result.taxAmount).toBe(14555);
+    expect(result.taxAmount).toBeCloseTo(14554.8, 2);
   });
 
   it('leaves an exact-rupee GST untouched', () => {
-    // 50000 x 18% = 9000.00 exactly - must not creep to 9001
+    // 50000 x 18% = 9000.00 exactly
     const result = calculateQuoteTotal([{ lineTotal: 50000 }], 'ex-works', 0, [], 0, false);
-    expect(result.taxAmount).toBe(9000);
+    expect(result.taxAmount).toBeCloseTo(9000, 2);
   });
 });
 
@@ -392,11 +345,13 @@ describe('convertToUSD', () => {
     expect(convertToUSD(83500, 83.5)).toBe(1000);
   });
 
-  it('rounds UP to the next whole dollar (ceiling)', () => {
-    // 100000 / 83.5 = 1197.60... → ceil to 1198
-    expect(convertToUSD(100000, 83.5)).toBe(1198);
-    // 83000 / 83.5 = 994.01... → ceil to 995 (Math.round would give 994)
-    expect(convertToUSD(83000, 83.5)).toBe(995);
+  it('converts exactly — no whole-dollar or $10 ceiling', () => {
+    // 100000 / 83.5 = 1197.60... — the old rule pushed this to 1198
+    expect(convertToUSD(100000, 83.5)).toBeCloseTo(1197.6, 2);
+    // 83000 / 83.5 = 994.01... — the old rule pushed this to 995
+    expect(convertToUSD(83000, 83.5)).toBeCloseTo(994.01, 2);
+    // a quoted unit price is converted the same way as any other amount
+    expect(convertToUSD(52950, 83.5)).toBeCloseTo(634.13, 2);
   });
 
   it('handles zero exchange rate', () => {
@@ -412,45 +367,16 @@ describe('convertToUSD', () => {
   });
 });
 
-// A quoted USD unit price rounds UP to the next $10 — the dollar mirror of
-// the ₹10 ceiling applied to INR unit prices.
-describe('unitPriceToUSD', () => {
-  it('rounds UP to the next ten dollars', () => {
-    // 52950 / 83.5 = 634.13... → 640 (not 635, and certainly not 634)
-    expect(unitPriceToUSD(52950, 83.5)).toBe(640);
-    // 8320 / 83.5 = 99.64... → 100
-    expect(unitPriceToUSD(8320, 83.5)).toBe(100);
-  });
-
-  it('leaves an exact multiple of ten alone', () => {
-    expect(unitPriceToUSD(83500, 83.5)).toBe(1000);
-  });
-
-  it('rounds a value just over a ten up to the next ten', () => {
-    // 8360 / 83.5 = 100.11... → 110
-    expect(unitPriceToUSD(8360, 83.5)).toBe(110);
-  });
-
-  it('handles a zero or negative exchange rate', () => {
-    expect(unitPriceToUSD(100000, 0)).toBe(0);
-    expect(unitPriceToUSD(100000, -1)).toBe(0);
-  });
-
-  it('handles a zero amount', () => {
-    expect(unitPriceToUSD(0, 83.5)).toBe(0);
-  });
-});
-
 describe('lineToUSD', () => {
-  it('rounds the unit price UP to the next $10, then multiplies by quantity', () => {
-    // ceil(8320 / 83.5 / 10) × 10 × 2 = 100 × 2 = 200
-    expect(lineToUSD(8320, 2, 83.5)).toBe(200);
+  it('converts the unit price exactly, then multiplies by quantity', () => {
+    // 8320 / 83.5 × 2 = 199.28... — the old rule gave a flat $200
+    expect(lineToUSD(8320, 2, 83.5)).toBeCloseTo(199.28, 2);
   });
 
-  it('equals unitPriceToUSD(unit) × qty (never round of the product)', () => {
+  it('equals convertToUSD(unit) × qty', () => {
     const unit = 52950, qty = 3, rate = 83.5;
-    expect(lineToUSD(unit, qty, rate)).toBe(unitPriceToUSD(unit, rate) * qty);
-    expect(lineToUSD(unit, qty, rate)).toBe(1920);
+    expect(lineToUSD(unit, qty, rate)).toBe(convertToUSD(unit, rate) * qty);
+    expect(lineToUSD(unit, qty, rate)).toBeCloseTo(1902.4, 2);
   });
 
   it('handles zero exchange rate', () => {
@@ -567,14 +493,15 @@ describe('calculateProductPrice — Quantity', () => {
     actuator: 0, handwheel: 0, accessories: 0,
   };
 
-  it('lineTotal = unitPrice × quantity, rounded to ₹10', () => {
+  it('lineTotal = unitPrice × quantity, both exact', () => {
     const result = calculateProductPrice(costs, {
       mfgProfitPct: 25, boProfitPct: 0, negMarginPct: 0,
       commissionPct: 0, discountPct: 0, quantity: 100,
     });
-    // mfg=1000, with 25% margin = 1000/0.75 = 1333.33 → rounded = 1340
-    expect(result.unitPrice).toBe(1340);
-    // lineTotal = 1340 × 100 = 134000 (exact multiple of 10)
-    expect(result.lineTotal).toBe(134000);
+    // mfg=1000, with 25% margin = 1000/0.75 = 1333.33... (was rounded to 1340)
+    expect(result.unitPrice).toBeCloseTo(1333.33, 2);
+    // lineTotal = 1333.33... × 100 (was 134000)
+    expect(result.lineTotal).toBeCloseTo(133333.33, 2);
+    expect(result.lineTotal).toBe(result.unitPrice * 100);
   });
 });

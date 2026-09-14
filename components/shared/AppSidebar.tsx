@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { useQuoteStore } from '@/stores/quoteStore';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -55,6 +56,7 @@ interface AppSidebarProps {
 export function AppSidebar({ role, userName, userEmail }: AppSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const editingQuote = useQuoteStore((s) => s.edit_mode);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -69,6 +71,12 @@ export function AppSidebar({ role, userName, userEmail }: AppSidebarProps) {
 
   const isActive = (href: string) => {
     if (href.endsWith('/dashboard')) return pathname === href;
+    // Editing an existing quote reuses the wizard at /employee/new-quote, so
+    // the raw path would light up "New Quote" — which isn't what the user is
+    // doing. Point the highlight at "My Quotes" for the duration of the edit.
+    if (editingQuote && pathname.startsWith('/employee/new-quote')) {
+      return href === '/employee/quotes';
+    }
     return pathname.startsWith(href);
   };
 

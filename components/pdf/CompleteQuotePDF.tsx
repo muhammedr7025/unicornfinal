@@ -1,7 +1,7 @@
 import {
   Document, Page, Text, View, StyleSheet, Font, Image,
 } from '@react-pdf/renderer';
-import { convertToUSD, unitPriceToUSD, roundUpRupee } from '@/lib/pricingEngine';
+import { convertToUSD } from '@/lib/pricingEngine';
 import { formatDeliveryText } from '@/lib/quoteHelpers';
 import path from 'path';
 import fs from 'fs';
@@ -387,14 +387,13 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
   const sym = isIntl ? '$' : 'Rs.';
   const isUnpriced = mode === 'unpriced-summary';
 
-  // ── Currency rounding, all ceilings so the quote never undercharges ──
-  // toUSD:     quote-level charges → next whole dollar (no ₹10 rule in INR either)
-  // unitToUSD: quoted unit price   → next $10 (dollar mirror of the ₹10 ceiling)
-  // fmtINRVal: any rupee figure    → next whole rupee
+  // ── Currency formatting — exact values, no rounding ──
+  // The two decimals below are display precision only; no amount is rounded
+  // to a rupee, a ₹10 step, a dollar or a $10 step anywhere in this document.
+  const money2 = { minimumFractionDigits: 2, maximumFractionDigits: 2 } as const;
   const toUSD = (inr: number) => convertToUSD(inr, exchangeRate);
-  const unitToUSD = (inr: number) => unitPriceToUSD(inr, exchangeRate);
-  const fmtUSDVal = (usd: number) => `${sym} ${Math.ceil(usd).toLocaleString('en-US')}`;
-  const fmtINRVal = (inr: number) => `${sym} ${roundUpRupee(inr).toLocaleString('en-IN')}`;
+  const fmtUSDVal = (usd: number) => `${sym} ${usd.toLocaleString('en-US', money2)}`;
+  const fmtINRVal = (inr: number) => `${sym} ${inr.toLocaleString('en-IN', money2)}`;
 
   /** Format a single INR value */
   const fmt = (inr: number) => {
@@ -403,17 +402,17 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
     return fmtINRVal(inr);
   };
 
-  /** Format a quoted unit price (₹10 ceiling in INR, $10 ceiling in USD) */
+  /** Format a quoted unit price */
   const fmtUnit = (inr: number) => {
     if (isUnpriced) return 'Quoted';
-    if (isIntl) return fmtUSDVal(unitToUSD(inr));
+    if (isIntl) return fmtUSDVal(toUSD(inr));
     return fmtINRVal(inr);
   };
 
   /** Format a line total: unit × qty (computed in display currency) */
   const fmtLine = (unitInr: number, qty: number) => {
     if (isUnpriced) return 'Quoted';
-    if (isIntl) return fmtUSDVal(unitToUSD(unitInr) * qty);
+    if (isIntl) return fmtUSDVal(toUSD(unitInr) * qty);
     return fmtINRVal(unitInr * qty);
   };
 
@@ -445,7 +444,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
   // For both INR and USD: compute product subtotal from individual products
   // (quote.subtotal_inr includes packing/freight/custom — can't use it as "Ex-Works")
   const exWorksDisplay = isIntl
-    ? sorted.reduce((sum, p) => sum + unitToUSD(p.unit_price_inr) * p.quantity, 0)
+    ? sorted.reduce((sum, p) => sum + toUSD(p.unit_price_inr) * p.quantity, 0)
     : sorted.reduce((sum, p) => sum + p.line_total_inr, 0);
   const packingDisplay = isIntl ? toUSD(packing) : packing;
   const freightDisplay = isIntl ? toUSD(freight) : freight;
