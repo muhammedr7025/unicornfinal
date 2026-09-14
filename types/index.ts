@@ -66,9 +66,9 @@ export interface Quote {
   freight_price: number;
   packing_price: number;
   custom_pricing_title: string | null;
-  custom_pricing_price: number;
+  // Second custom charge title — shares custom_pricing_price with the first.
   custom_pricing_title_2: string | null;
-  custom_pricing_price_2: number;
+  custom_pricing_price: number;
   exchange_rate_snapshot: number | null;
   notes: string | null;
 

@@ -56,3 +56,18 @@ export function formatDeliveryText(deliveryText: string | null | undefined): str
   const text = (deliveryText ?? '').trim();
   return text ? `${text} ${DELIVERY_TERMS_SUFFIX}` : '';
 }
+
+/**
+ * Custom pricing carries two titles that share a single price. This builds
+ * the one label they're shown under, so the wizard, both quote detail pages,
+ * the PDF and the Excel export always word it the same way.
+ */
+export function customPricingLabel(
+  title1: string | null | undefined,
+  title2: string | null | undefined,
+): string {
+  return [title1, title2]
+    .map(t => (t ?? '').trim())
+    .filter(Boolean)
+    .join(' / ');
+}

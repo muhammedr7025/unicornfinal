@@ -1,11 +1,15 @@
 -- ============================================================
--- 009: Second custom pricing line item
+-- 009: Second custom pricing title
 -- ============================================================
 
 -- Custom pricing previously held a single title + price (migration 007).
--- Quotes need to list two custom charges (e.g. "Installation Charges" and
--- "Supervision Charges"), so a second title/price pair is added alongside
--- the first. Both are optional — a quote may use one or both.
+-- A quote needs to name two custom charges (e.g. "Installation Charges"
+-- and "Supervision Charges") that share ONE price, so only a second title
+-- is added — the existing custom_pricing_price covers both.
+-- The second title is optional.
 
 ALTER TABLE quotes ADD COLUMN IF NOT EXISTS custom_pricing_title_2 TEXT;
-ALTER TABLE quotes ADD COLUMN IF NOT EXISTS custom_pricing_price_2 NUMERIC(12,2) DEFAULT 0;
+
+-- An earlier revision of this migration also added a second price column.
+-- There is only ever one price, so drop it if that revision was applied.
+ALTER TABLE quotes DROP COLUMN IF EXISTS custom_pricing_price_2;

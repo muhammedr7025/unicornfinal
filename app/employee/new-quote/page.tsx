@@ -18,6 +18,7 @@ import {
   Settings2, Package, Calculator, CheckCircle, FileText, AlertTriangle
 } from 'lucide-react';
 import { calculateProductPrice, calculateQuoteTotal, convertToUSD, lineToUSD } from '@/lib/pricingEngine';
+import { customPricingLabel } from '@/lib/quoteHelpers';
 import type { Customer } from '@/types';
 
 // REMOVED: const TRIM_TYPES and const SEAL_TYPES — now loaded from DB
@@ -516,11 +517,12 @@ export default function NewQuotePage() {
       // Calculate totals
       const customer = customers.find(c => c.id === store.customer_id);
       const lineItems = store.products.map(p => ({ lineTotal: p.line_total }));
-      const customItems = store.pricing_type === 'custom'
-        ? [
-            { name: store.custom_pricing_title, price: store.custom_pricing_price },
-            { name: store.custom_pricing_title_2, price: store.custom_pricing_price_2 },
-          ].filter(item => item.name.trim())
+      // Two titles, one price — a single charge on the quote total.
+      const customItems = store.pricing_type === 'custom' && store.custom_pricing_title.trim()
+        ? [{
+            name: customPricingLabel(store.custom_pricing_title, store.custom_pricing_title_2),
+            price: store.custom_pricing_price,
+          }]
         : [];
       const quoteTotal = calculateQuoteTotal(
         lineItems,
@@ -547,9 +549,8 @@ export default function NewQuotePage() {
         warranty_installation_months: store.warranty_installation_months,
         pricing_type: store.pricing_type,
         custom_pricing_title: store.pricing_type === 'custom' ? store.custom_pricing_title.trim() : null,
-        custom_pricing_price: store.pricing_type === 'custom' ? store.custom_pricing_price : 0,
         custom_pricing_title_2: store.pricing_type === 'custom' && store.custom_pricing_title_2.trim() ? store.custom_pricing_title_2.trim() : null,
-        custom_pricing_price_2: store.pricing_type === 'custom' && store.custom_pricing_title_2.trim() ? store.custom_pricing_price_2 : 0,
+        custom_pricing_price: store.pricing_type === 'custom' ? store.custom_pricing_price : 0,
         freight_price: store.freight_price,
         packing_price: store.packing_price,
         exchange_rate_snapshot: exchangeRate,
@@ -744,16 +745,7 @@ export default function NewQuotePage() {
       if (!store.delivery_text.trim()) { toast.error('Delivery timeline is required (e.g. "4-6 working weeks")'); return false; }
       if (store.pricing_type === 'for-site' && store.freight_price <= 0) { toast.error('Freight price is required for F.O.R. pricing'); return false; }
       if (store.pricing_type === 'custom' && !store.custom_pricing_title.trim()) { toast.error('Custom pricing title 1 is required'); return false; }
-      // The second item is optional, but a title with no price (or the
-      // reverse) would silently drop off the quote — catch it here instead.
-      if (store.pricing_type === 'custom' && store.custom_pricing_title_2.trim() && store.custom_pricing_price_2 <= 0) {
-        toast.error('Custom pricing item 2 has a title but no price — add a price or clear the title');
-        return false;
-      }
-      if (store.pricing_type === 'custom' && !store.custom_pricing_title_2.trim() && store.custom_pricing_price_2 > 0) {
-        toast.error('Custom pricing item 2 has a price but no title — add a title or clear the price');
-        return false;
-      }
+      if (store.pricing_type === 'custom' && store.custom_pricing_price <= 0) { toast.error('Custom pricing price is required and must be > 0'); return false; }
       const paymentTotal = store.payment_advance_pct + store.payment_approval_pct + store.payment_despatch_pct;
       if (paymentTotal !== 100) { toast.error(`Payment terms must total 100% (currently ${paymentTotal}%)`); return false; }
       return true;
@@ -1023,78 +1015,54 @@ function StepTermsPricing({ customers, exchangeRate }: { customers: Customer[]; 
               </Select>
             </div>
 
-            {/* Custom pricing — two optional title + price items */}
+            {/* Custom pricing — two titles sharing one price */}
             {store.pricing_type === 'custom' && (
-              <div className="rounded-lg border-2 border-violet-200 bg-violet-50/30 dark:bg-violet-950/10 p-4 space-y-4">
-                <p className="text-xs font-bold text-violet-800 dark:text-violet-400 uppercase tracking-wider">Custom Pricing Items</p>
-                {([
-                  {
-                    n: 1,
-                    required: true,
-                    title: store.custom_pricing_title,
-                    price: store.custom_pricing_price,
-                    setTitle: (v: string) => store.setQuoteSettings({ custom_pricing_title: v }),
-                    setPrice: (v: number) => store.setQuoteSettings({ custom_pricing_price: v }),
-                  },
-                  {
-                    n: 2,
-                    required: false,
-                    title: store.custom_pricing_title_2,
-                    price: store.custom_pricing_price_2,
-                    setTitle: (v: string) => store.setQuoteSettings({ custom_pricing_title_2: v }),
-                    setPrice: (v: number) => store.setQuoteSettings({ custom_pricing_price_2: v }),
-                  },
-                ]).map((item) => (
-                  <div key={item.n} className={item.n === 2 ? 'space-y-2 pt-3 border-t border-violet-200/70' : 'space-y-2'}>
-                    <div className="space-y-2">
-                      <Label className="text-xs">
-                        Title {item.n} {item.required ? '*' : <span className="text-muted-foreground font-normal">(optional)</span>}
-                      </Label>
-                      <Input
-                        value={item.title}
-                        onChange={(e) => item.setTitle(e.target.value)}
-                        placeholder={item.n === 1 ? 'e.g. Installation Charges' : 'e.g. Supervision Charges'}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs">{isIntl ? `Price ${item.n} (USD $)` : `Price ${item.n} (₹)`} {item.required && '*'}</Label>
-                      <div className="relative">
-                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{isIntl ? '$' : '₹'}</span>
-                        <Input
-                          type="number" min="0"
-                          className="pl-6"
-                          disabled={isIntl && exchangeRate <= 0}
-                          value={isIntl
-                            ? (item.price > 0 && exchangeRate > 0 ? item.price / exchangeRate : '')
-                            : (item.price || '')}
-                          onChange={(e) => {
-                            const raw = e.target.value === '' ? 0 : Number(e.target.value);
-                            // Stored in INR; an international user types USD and we
-                            // keep the exact INR equivalent.
-                            item.setPrice(isIntl ? raw * exchangeRate : raw);
-                          }}
-                          placeholder="0"
-                        />
-                      </div>
-                      {isIntl && exchangeRate <= 0 && (
-                        <p className="text-[10px] text-destructive">Set the dollar rate first.</p>
-                      )}
-                    </div>
-                    {item.title && item.price > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        {item.title}:{' '}
-                        <strong>
-                          {isIntl && exchangeRate > 0
-                            ? `$${(item.price / exchangeRate).toLocaleString('en-US', MONEY2)}`
-                            : `₹${item.price.toLocaleString('en-IN', MONEY2)}`}
-                        </strong>
-                        {isIntl && exchangeRate > 0 && (
-                          <span className="text-muted-foreground"> (= ₹{item.price.toLocaleString('en-IN', MONEY2)})</span>
-                        )}
-                      </p>
-                    )}
+              <div className="rounded-lg border-2 border-violet-200 bg-violet-50/30 dark:bg-violet-950/10 p-4 space-y-3">
+                <p className="text-xs font-bold text-violet-800 dark:text-violet-400 uppercase tracking-wider">Custom Pricing</p>
+                <div className="space-y-2">
+                  <Label className="text-xs">Title 1 *</Label>
+                  <Input
+                    value={store.custom_pricing_title}
+                    onChange={(e) => store.setQuoteSettings({ custom_pricing_title: e.target.value })}
+                    placeholder="e.g. Installation Charges"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Title 2 <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                  <Input
+                    value={store.custom_pricing_title_2}
+                    onChange={(e) => store.setQuoteSettings({ custom_pricing_title_2: e.target.value })}
+                    placeholder="e.g. Supervision Charges"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">{isIntl ? 'Price (USD $) *' : 'Price (₹) *'}</Label>
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{isIntl ? '$' : '₹'}</span>
+                    <Input
+                      type="number" min="0"
+                      className="pl-6"
+                      disabled={isIntl && exchangeRate <= 0}
+                      value={isIntl
+                        ? (store.custom_pricing_price > 0 && exchangeRate > 0 ? store.custom_pricing_price / exchangeRate : '')
+                        : (store.custom_pricing_price || '')}
+                      onChange={(e) => {
+                        const raw = e.target.value === '' ? 0 : Number(e.target.value);
+                        // Stored in INR; an international user types USD and we
+                        // keep the exact INR equivalent.
+                        store.setQuoteSettings({ custom_pricing_price: isIntl ? raw * exchangeRate : raw });
+                      }}
+                      placeholder="0"
+                    />
                   </div>
-                ))}
+                  {isIntl && exchangeRate <= 0 && (
+                    <p className="text-[10px] text-destructive">Set the dollar rate first.</p>
+                  )}
+                  {isIntl && exchangeRate > 0 && store.custom_pricing_price > 0 && (
+                    <p className="text-[10px] text-muted-foreground">= ₹{store.custom_pricing_price.toLocaleString('en-IN', MONEY2)} INR</p>
+                  )}
+                  <p className="text-[10px] text-muted-foreground">This one price covers both titles above.</p>
+                </div>
               </div>
             )}
 
@@ -2342,14 +2310,9 @@ function StepReview({ customers, exchangeRate }: { customers: Customer[]; exchan
   const productSubtotalINR = store.products.reduce((s, p) => s + p.line_total, 0);
   const freightINR = store.pricing_type === 'for-site' ? store.freight_price : 0;
   const packingINR = store.packing_price;
-  // Both custom items count toward the total; either may be left blank.
-  const customItems = store.pricing_type === 'custom'
-    ? [
-        { name: store.custom_pricing_title, price: store.custom_pricing_price },
-        { name: store.custom_pricing_title_2, price: store.custom_pricing_price_2 },
-      ].filter(item => item.name.trim() && item.price > 0)
-    : [];
-  const customChargeINR = customItems.reduce((s, item) => s + item.price, 0);
+  // Two titles, one price — a single charge on the quote total.
+  const customLabel = customPricingLabel(store.custom_pricing_title, store.custom_pricing_title_2);
+  const customChargeINR = store.pricing_type === 'custom' ? store.custom_pricing_price : 0;
   const taxableINR = productSubtotalINR + freightINR + packingINR + customChargeINR;
   const taxINR = isIntl ? 0 : taxableINR * 0.18;
 
@@ -2397,12 +2360,9 @@ function StepReview({ customers, exchangeRate }: { customers: Customer[]; exchan
             <div className="flex justify-between"><span className="text-muted-foreground">Products ({store.products.length})</span><span>{money(subtotal)}</span></div>
             {freight > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Freight</span><span>{money(freight)}</span></div>}
             {packing > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Packing</span><span>{money(packing)}</span></div>}
-            {customItems.map((item, i) => (
-              <div key={i} className="flex justify-between">
-                <span className="text-muted-foreground">{item.name}</span>
-                <span>{money(isIntl ? convertToUSD(item.price, rate) : item.price)}</span>
-              </div>
-            ))}
+            {store.pricing_type === 'custom' && customLabel && customCharge > 0 && (
+              <div className="flex justify-between"><span className="text-muted-foreground">{customLabel}</span><span>{money(customCharge)}</span></div>
+            )}
             <Separator />
             <div className="flex justify-between"><span className="text-muted-foreground">Taxable Amount</span><span>{money(taxableAmount)}</span></div>
             {!isIntl && (

@@ -28,9 +28,8 @@ export interface QuoteEditInput {
   pricing_mode: PricingMode;
   pricing_type: PricingType;
   custom_pricing_title?: string | null;
-  custom_pricing_price?: Numeric | null;
   custom_pricing_title_2?: string | null;
-  custom_pricing_price_2?: Numeric | null;
+  custom_pricing_price?: Numeric | null;
   validity_days: number;
   delivery_text: string;
   payment_advance_pct: Numeric;
@@ -229,9 +228,8 @@ interface QuoteState {
   agent_commission_pct: number;
   pricing_type: 'ex-works' | 'for-site' | 'custom';
   custom_pricing_title: string;
-  custom_pricing_price: number;
   custom_pricing_title_2: string;
-  custom_pricing_price_2: number;
+  custom_pricing_price: number;
   validity_days: number;
   delivery_text: string;
   payment_advance_pct: number;
@@ -293,9 +291,8 @@ const initialState = {
   agent_commission_pct: 0,
   pricing_type: 'ex-works' as const,
   custom_pricing_title: '',
-  custom_pricing_price: 0,
   custom_pricing_title_2: '',
-  custom_pricing_price_2: 0,
+  custom_pricing_price: 0,
   validity_days: 30,
   delivery_text: '',
   payment_advance_pct: 30,
@@ -433,9 +430,8 @@ export const useQuoteStore = create<QuoteState>((set, get) => ({
     agent_commission_pct: Number(products[0]?.commission_pct ?? 0),
     pricing_type: quote.pricing_type,
     custom_pricing_title: quote.custom_pricing_title ?? '',
-    custom_pricing_price: Number(quote.custom_pricing_price ?? 0),
     custom_pricing_title_2: quote.custom_pricing_title_2 ?? '',
-    custom_pricing_price_2: Number(quote.custom_pricing_price_2 ?? 0),
+    custom_pricing_price: Number(quote.custom_pricing_price ?? 0),
     validity_days: quote.validity_days,
     delivery_text: quote.delivery_text,
     payment_advance_pct: Number(quote.payment_advance_pct),

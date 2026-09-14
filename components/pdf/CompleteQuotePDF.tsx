@@ -2,7 +2,7 @@ import {
   Document, Page, Text, View, StyleSheet, Font, Image,
 } from '@react-pdf/renderer';
 import { convertToUSD } from '@/lib/pricingEngine';
-import { formatDeliveryText } from '@/lib/quoteHelpers';
+import { formatDeliveryText, customPricingLabel } from '@/lib/quoteHelpers';
 import path from 'path';
 import fs from 'fs';
 
@@ -348,9 +348,8 @@ export interface CompleteQuoteProps {
     freight_price: number;
     packing_price: number;
     custom_pricing_title?: string;
-    custom_pricing_price: number;
     custom_pricing_title_2?: string;
-    custom_pricing_price_2?: number;
+    custom_pricing_price: number;
     subtotal_inr: number;
     tax_amount_inr: number;
     grand_total_inr: number;
@@ -440,12 +439,9 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
   // ── Compute display values ──
   const packing = quote.packing_price || 0;
   const freight = quote.freight_price || 0;
-  // Up to two custom charges; either may be blank.
-  const customItems = [
-    { name: quote.custom_pricing_title, price: quote.custom_pricing_price || 0 },
-    { name: quote.custom_pricing_title_2, price: quote.custom_pricing_price_2 || 0 },
-  ].filter((item): item is { name: string; price: number } => !!item.name && item.price > 0);
-  const customExtra = customItems.reduce((sum, item) => sum + item.price, 0);
+  // Two titles sharing one price.
+  const customLabel = customPricingLabel(quote.custom_pricing_title, quote.custom_pricing_title_2);
+  const customExtra = quote.custom_pricing_price || 0;
   const isForSite = quote.pricing_type === 'for-site';
 
   // For both INR and USD: compute product subtotal from individual products
@@ -638,12 +634,12 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
               <Text style={s.totValue}>{fmtDisplay(freightDisplay)}</Text>
             </View>
           )}
-          {customItems.map((item, i) => (
-            <View style={s.totRow} key={i}>
-              <Text style={s.totLabel}>{item.name}</Text>
-              <Text style={s.totValue}>{fmtDisplay(isIntl ? toUSD(item.price) : item.price)}</Text>
+          {customLabel && customExtra > 0 && (
+            <View style={s.totRow}>
+              <Text style={s.totLabel}>{customLabel}</Text>
+              <Text style={s.totValue}>{fmtDisplay(customExtraDisplay)}</Text>
             </View>
-          ))}
+          )}
           {!isIntl && gstAmount > 0 && (
             <View style={s.totRow}>
               <Text style={s.totLabel}>GST(18 %)</Text>
