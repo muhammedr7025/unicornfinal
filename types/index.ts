@@ -67,6 +67,8 @@ export interface Quote {
   packing_price: number;
   custom_pricing_title: string | null;
   custom_pricing_price: number;
+  custom_pricing_title_2: string | null;
+  custom_pricing_price_2: number;
   exchange_rate_snapshot: number | null;
   notes: string | null;
 

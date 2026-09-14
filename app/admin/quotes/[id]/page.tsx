@@ -156,7 +156,14 @@ export default function AdminQuoteDetailPage({ params }: { params: Promise<{ id:
   const productSubtotalUSD = products.reduce((s, p) => s + toUSD(Number(p.unit_price_inr ?? 0)) * p.quantity, 0);
   const packingPrice = Number(quote.packing_price ?? 0);
   const freightPrice = Number(quote.freight_price ?? 0);
-  const customPricingPrice = Number(quote.custom_pricing_price ?? 0);
+  // Custom pricing carries up to two title/price items; either may be blank.
+  const customItems = quote.pricing_type === 'custom'
+    ? [
+        { name: quote.custom_pricing_title, price: Number(quote.custom_pricing_price ?? 0) },
+        { name: quote.custom_pricing_title_2, price: Number(quote.custom_pricing_price_2 ?? 0) },
+      ].filter((item): item is { name: string; price: number } => !!item.name && item.price > 0)
+    : [];
+  const customPricingPrice = customItems.reduce((s, item) => s + item.price, 0);
   const taxINR = Number(quote.tax_amount_inr ?? 0);
   const grandTotalINR = Number(quote.grand_total_inr ?? 0);
 
@@ -392,13 +399,13 @@ export default function AdminQuoteDetailPage({ params }: { params: Promise<{ id:
                   )}
 
                   {/* Custom pricing row */}
-                  {quote.pricing_type === 'custom' && quote.custom_pricing_title && Number(quote.custom_pricing_price ?? 0) > 0 && (
-                    <TableRow className="bg-muted/20">
-                      <TableCell colSpan={isIntl ? 6 : 5} className="text-right font-medium">{quote.custom_pricing_title}:</TableCell>
-                      {isIntl && <TableCell className="text-right font-medium text-blue-600 dark:text-blue-400">{fmtUSD(Number(quote.custom_pricing_price))}</TableCell>}
-                      <TableCell className="text-right font-medium">{fmtINR(Number(quote.custom_pricing_price))}</TableCell>
+                  {customItems.map((item, i) => (
+                    <TableRow key={i} className="bg-muted/20">
+                      <TableCell colSpan={isIntl ? 6 : 5} className="text-right font-medium">{item.name}:</TableCell>
+                      {isIntl && <TableCell className="text-right font-medium text-blue-600 dark:text-blue-400">{fmtUSD(item.price)}</TableCell>}
+                      <TableCell className="text-right font-medium">{fmtINR(item.price)}</TableCell>
                     </TableRow>
-                  )}
+                  ))}
 
                   {/* GST row */}
                   {!isIntl && taxINR > 0 && (

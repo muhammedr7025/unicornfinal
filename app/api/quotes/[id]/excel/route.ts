@@ -82,14 +82,20 @@ export async function GET(
     const subtotalProducts = productList.reduce((s, p) => s + Number(p.line_total_inr ?? 0), 0);
     const freight = quote.pricing_type === 'for-site' ? Number(quote.freight_price ?? 0) : 0;
     const packing = Number(quote.packing_price ?? 0);
-    const customCharge = quote.pricing_type === 'custom' ? Number(quote.custom_pricing_price ?? 0) : 0;
+    // Custom pricing carries up to two title/price items; either may be blank.
+    const customItems = quote.pricing_type === 'custom'
+      ? [
+          { name: quote.custom_pricing_title, price: Number(quote.custom_pricing_price ?? 0) },
+          { name: quote.custom_pricing_title_2, price: Number(quote.custom_pricing_price_2 ?? 0) },
+        ].filter((item): item is { name: string; price: number } => !!item.name && item.price > 0)
+      : [];
     // Same helper the wizard saves with, so the workbook's GST and grand total
     // match the stored ones instead of re-deriving an unrounded tax.
     const { subtotal: taxable, taxAmount, grandTotal } = calculateQuoteTotal(
       productList.map((p) => ({ lineTotal: Number(p.line_total_inr ?? 0) })),
       quote.pricing_type,
       Number(quote.freight_price ?? 0),
-      quote.custom_pricing_title ? [{ name: quote.custom_pricing_title, price: Number(quote.custom_pricing_price ?? 0) }] : [],
+      customItems,
       packing,
       isIntl,
     );
@@ -135,7 +141,7 @@ export async function GET(
       [`Products Subtotal (${currencyLabel})`, displayAmount(subtotalProducts)],
       ...(freight > 0 ? [[`Freight (${currencyLabel})`, displayAmount(freight)]] : []),
       [`Packing (${currencyLabel})`, displayAmount(packing)],
-      ...(quote.pricing_type === 'custom' && quote.custom_pricing_title ? [[`${quote.custom_pricing_title} (${currencyLabel})`, displayAmount(customCharge)]] : []),
+      ...customItems.map(item => [`${item.name} (${currencyLabel})`, displayAmount(item.price)]),
       [`Taxable Amount (${currencyLabel})`, displayAmount(taxable)],
       ...(!isIntl ? [['GST 18% (INR)', taxAmount]] : []),
       [`GRAND TOTAL (${currencyLabel})`, displayAmount(grandTotal)],
