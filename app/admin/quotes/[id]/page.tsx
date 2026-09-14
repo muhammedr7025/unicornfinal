@@ -12,6 +12,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import Link from 'next/link';
 import { use } from 'react';
 import type { Quote, QuoteProduct, Customer, Profile } from '@/types';
+import { formatDeliveryText } from '@/lib/quoteHelpers';
 
 type QuoteDetail = Quote & {
   customer: Customer;
@@ -292,7 +293,7 @@ export default function AdminQuoteDetailPage({ params }: { params: Promise<{ id:
               <Truck className="w-4 h-4 text-orange-500" />
               <p className="text-xs font-semibold text-orange-600 dark:text-orange-400">Delivery</p>
             </div>
-            <p className="text-sm font-bold">{quote.delivery_text}</p>
+            <p className="text-sm font-bold">{formatDeliveryText(quote.delivery_text)}</p>
           </CardContent>
         </Card>
 

@@ -226,3 +226,49 @@ describe('defaults', () => {
     expect(useQuoteStore.getState().products[0].price_stale).toBe(false);
   });
 });
+
+describe('consumeEditFlowEntry (new-quote mount reset guard)', () => {
+  const editPayload = {
+    quote: {
+      id: 'q1', customer_id: 'c1', quote_number: 'UV-1', pricing_mode: 'standard' as const,
+      pricing_type: 'ex-works' as const, validity_days: 30, delivery_text: '4 weeks',
+      payment_advance_pct: 30, payment_approval_pct: 0, payment_despatch_pct: 70,
+      warranty_shipment_months: 18, warranty_installation_months: 12,
+    },
+    products: [],
+  };
+
+  it('returns true exactly once right after loadForEdit, then false', () => {
+    useQuoteStore.getState().loadForEdit(editPayload);
+    expect(useQuoteStore.getState().consumeEditFlowEntry()).toBe(true);
+    expect(useQuoteStore.getState().consumeEditFlowEntry()).toBe(false);
+  });
+
+  it('stays false for a plain reset (fresh "New Quote" click, never edited)', () => {
+    expect(useQuoteStore.getState().consumeEditFlowEntry()).toBe(false);
+  });
+
+  it('regression: abandoning an edit then clicking "New Quote" must reset the wizard', () => {
+    // Simulate: open quote q1 for edit ...
+    useQuoteStore.getState().loadForEdit(editPayload);
+    // ... the wizard's mount effect consumes the flag once (as it does on
+    // the redirect from the edit page) ...
+    expect(useQuoteStore.getState().consumeEditFlowEntry()).toBe(true);
+    expect(useQuoteStore.getState().edit_mode).toBe(true);
+
+    // ... the user navigates away WITHOUT saving (edit_mode is still true —
+    // nothing ever cleared it) ...
+    expect(useQuoteStore.getState().edit_mode).toBe(true);
+
+    // ... then clicks "New Quote". Before the fix, the wizard's mount effect
+    // checked `!store.edit_mode` here, saw it was still true, and skipped
+    // the reset — silently reopening quote q1 instead of a blank quote.
+    const cameFromEditRedirect = useQuoteStore.getState().consumeEditFlowEntry();
+    expect(cameFromEditRedirect).toBe(false);
+    if (!cameFromEditRedirect) useQuoteStore.getState().reset();
+
+    expect(useQuoteStore.getState().edit_mode).toBe(false);
+    expect(useQuoteStore.getState().edit_quote_id).toBe('');
+    expect(useQuoteStore.getState().customer_id).toBe('');
+  });
+});

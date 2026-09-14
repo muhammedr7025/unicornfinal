@@ -268,6 +268,12 @@ interface QuoteState {
   exchange_rate_snapshot: number | null;
   loadForEdit: (data: { quote: QuoteEditInput; products: QuoteProductEditInput[] }) => void;
 
+  // One-shot signal set by loadForEdit and consumed by the wizard's mount
+  // effect — see consumeEditFlowEntry below for why this exists separately
+  // from edit_mode.
+  just_entered_edit_flow: boolean;
+  consumeEditFlowEntry: () => boolean;
+
   // Reset
   reset: () => void;
 }
@@ -301,6 +307,7 @@ const initialState = {
   edit_mode: false,
   edit_quote_id: '',
   exchange_rate_snapshot: null as number | null,
+  just_entered_edit_flow: false,
 };
 
 // Product keys that feed the price calculation — changing any of these
@@ -328,7 +335,7 @@ function applyProductUpdate(p: ProductConfig, updates: Partial<ProductConfig>): 
   return { ...p, ...updates, ...(changed ? { price_stale: true } : {}) };
 }
 
-export const useQuoteStore = create<QuoteState>((set) => ({
+export const useQuoteStore = create<QuoteState>((set, get) => ({
   ...initialState,
 
   setCurrentStep: (step) => set({ currentStep: step }),
@@ -405,6 +412,7 @@ export const useQuoteStore = create<QuoteState>((set) => ({
   loadForEdit: ({ quote, products }) => set({
     edit_mode: true,
     edit_quote_id: quote.id,
+    just_entered_edit_flow: true,
     currentStep: 0,
     customer_id: quote.customer_id,
     customer_name: quote.customer?.name ?? '',
@@ -504,6 +512,22 @@ export const useQuoteStore = create<QuoteState>((set) => ({
       calc_seq: 0,
     })),
   }),
+
+  // The wizard's mount effect must reset the store on every arrival EXCEPT
+  // the one redirect immediately following loadForEdit — otherwise it would
+  // wipe the quote data loadForEdit just populated before the user sees it.
+  // Gating that on edit_mode (as a plain boolean) doesn't work: edit_mode
+  // stays true for as long as the user is editing, including if they
+  // navigate away mid-edit (dashboard, sidebar) without saving. Any later
+  // arrival at the wizard — e.g. clicking "New Quote" — would then see
+  // edit_mode still true and skip the reset, silently reopening the
+  // abandoned edit instead of starting a blank quote. This flag is
+  // consumed (read once, then cleared) so only that one redirect is exempt.
+  consumeEditFlowEntry: () => {
+    const wasEntering = get().just_entered_edit_flow;
+    if (wasEntering) set({ just_entered_edit_flow: false });
+    return wasEntering;
+  },
 
   reset: () => set({ ...initialState, products: [] }),
 }));

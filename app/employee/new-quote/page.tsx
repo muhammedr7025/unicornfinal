@@ -150,12 +150,21 @@ export default function NewQuotePage() {
     setLoadingData(false);
   }
 
-  // Runs once on mount only — store.reset()/store.edit_mode are read here
-  // deliberately without being tracked as effect deps, since `store` (the
-  // whole Zustand state) changes on every keystroke in the wizard and
+  // Runs once on mount only — store.reset()/consumeEditFlowEntry are read
+  // here deliberately without being tracked as effect deps, since `store`
+  // (the whole Zustand state) changes on every keystroke in the wizard and
   // re-running this would wipe the in-progress quote on every edit.
+  //
+  // Resets on every arrival EXCEPT the one redirect immediately following
+  // the edit page's loadForEdit() call. This used to check `store.edit_mode`
+  // instead, which stays true for as long as a quote is being edited —
+  // including after the user abandons the edit (e.g. navigates to the
+  // dashboard without saving). Clicking "New Quote" from anywhere after that
+  // would see edit_mode still true, skip the reset, and silently reopen the
+  // abandoned edit instead of starting a blank quote. consumeEditFlowEntry
+  // is a one-shot flag instead, so only that one redirect is exempt.
   useEffect(() => {
-    if (!store.edit_mode) {
+    if (!store.consumeEditFlowEntry()) {
       store.reset();
     }
     // Deferred to a microtask so loadInitialData's setState calls land after
@@ -990,7 +999,11 @@ function StepTermsPricing({ customers, exchangeRate, onRateChange }: { customers
                       : (store.packing_price || '')}
                     onChange={(e) => {
                       const raw = e.target.value === '' ? 0 : Number(e.target.value);
-                      store.setQuoteSettings({ packing_price: isIntl ? Math.round(raw * exchangeRate) : raw });
+                      // Store the exact INR equivalent — rounding it here was
+                      // redundant with (and could drift from) the ceiling-based
+                      // rounding convertToUSD/roundUpRupee already apply once,
+                      // at final display/quoting time.
+                      store.setQuoteSettings({ packing_price: isIntl ? raw * exchangeRate : raw });
                     }}
                   />
                 </div>

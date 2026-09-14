@@ -2,6 +2,7 @@ import {
   Document, Page, Text, View, StyleSheet, Font, Image,
 } from '@react-pdf/renderer';
 import { convertToUSD, unitPriceToUSD, roundUpRupee } from '@/lib/pricingEngine';
+import { formatDeliveryText } from '@/lib/quoteHelpers';
 import path from 'path';
 import fs from 'fs';
 
@@ -662,7 +663,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
           </View>
           <View style={s.termRow} wrap={false}>
             <Text style={s.termLabel}>Delivery{'\n'}(Ex-Works)</Text>
-            <Text style={s.termValue}>{quote.delivery_text}</Text>
+            <Text style={s.termValue}>{formatDeliveryText(quote.delivery_text)}</Text>
           </View>
           <View style={s.termRow} wrap={false}>
             <Text style={s.termLabel}>Warranty</Text>

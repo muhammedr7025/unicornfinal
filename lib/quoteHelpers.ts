@@ -44,3 +44,15 @@ export function buildProductDescription(config: {
   if (config.seatMaterial) parts.push(`Seat: ${config.seatMaterial}`);
   return parts.join(' | ');
 }
+
+/**
+ * Standard clause appended after the delivery timeline wherever it's shown
+ * (quote detail pages, PDF) — clarifies when the delivery clock starts.
+ */
+export const DELIVERY_TERMS_SUFFIX =
+  'Weeks from the date of receipt of approved documents or advance payment, whichever is later.';
+
+export function formatDeliveryText(deliveryText: string | null | undefined): string {
+  const text = (deliveryText ?? '').trim();
+  return text ? `${text} ${DELIVERY_TERMS_SUFFIX}` : '';
+}
