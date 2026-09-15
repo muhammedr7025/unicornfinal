@@ -2,7 +2,7 @@ import {
   Document, Page, Text, View, StyleSheet, Font, Image,
 } from '@react-pdf/renderer';
 import { convertToUSD } from '@/lib/pricingEngine';
-import { formatDeliveryText } from '@/lib/quoteHelpers';
+import { formatDeliveryText, finalTotalLabel } from '@/lib/quoteHelpers';
 import path from 'path';
 import fs from 'fs';
 
@@ -436,14 +436,9 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
   // labels the final total row, the way Ex-Works and F.O.R. get their own.
   const isCustom = quote.pricing_type === 'custom';
   const customChargeTitle = quote.custom_pricing_title?.trim() ?? '';
-  const customTotalTitle = quote.custom_pricing_title_2?.trim() || 'Total Price';
   const customExtra = isCustom ? quote.custom_pricing_price || 0 : 0;
   const isForSite = quote.pricing_type === 'for-site';
-  const finalTotalLabel = isForSite
-    ? 'Total F.O.R. Site Price (Excluding Insurance)'
-    : isCustom
-      ? customTotalTitle
-      : 'Total Ex-works Price(Excluding Freight/Insurance)';
+  const totalLabel = finalTotalLabel(quote.pricing_type, quote.custom_pricing_title_2);
 
   // For both INR and USD: compute product subtotal from individual products
   // (quote.subtotal_inr includes packing/freight/custom — can't use it as "Ex-Works")
@@ -648,7 +643,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
             </View>
           )}
           <View style={[s.totRow, { borderBottomWidth: 0 }]}>
-            <Text style={[s.totLabel, s.totFinal]}>{finalTotalLabel}</Text>
+            <Text style={[s.totLabel, s.totFinal]}>{totalLabel}</Text>
             <Text style={[s.totValue, s.totFinal]}>{fmtDisplay(grandTotalDisplay)}</Text>
           </View>
         </View>

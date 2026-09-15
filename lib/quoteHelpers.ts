@@ -56,3 +56,25 @@ export function formatDeliveryText(deliveryText: string | null | undefined): str
   const text = (deliveryText ?? '').trim();
   return text ? `${text} ${DELIVERY_TERMS_SUFFIX}` : '';
 }
+
+/**
+ * Label for a quote's final total row. Ex-Works and F.O.R. have fixed
+ * wording; a Custom quote uses its second custom title (custom_pricing_title_2),
+ * falling back to "Total Price" for quotes saved before that title existed.
+ * Shared by the PDF and the Excel export so they always agree.
+ */
+export function finalTotalLabel(
+  pricingType: string,
+  customTotalTitle: string | null | undefined,
+): string {
+  if (pricingType === 'for-site') return 'Total F.O.R. Site Price (Excluding Insurance)';
+  if (pricingType === 'custom') return customTotalTitle?.trim() || 'Total Price';
+  return 'Total Ex-works Price(Excluding Freight/Insurance)';
+}
+
+/** Human-readable pricing type, e.g. "for-site" → "F.O.R. Site". */
+export function pricingTypeLabel(pricingType: string): string {
+  if (pricingType === 'for-site') return 'F.O.R. Site';
+  if (pricingType === 'custom') return 'Custom';
+  return 'Ex-Works';
+}
