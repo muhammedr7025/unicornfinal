@@ -2,7 +2,7 @@ import {
   Document, Page, Text, View, StyleSheet, Font, Image,
 } from '@react-pdf/renderer';
 import { convertToUSD } from '@/lib/pricingEngine';
-import { formatDeliveryText, customPricingLabel } from '@/lib/quoteHelpers';
+import { formatDeliveryText } from '@/lib/quoteHelpers';
 import path from 'path';
 import fs from 'fs';
 
@@ -396,13 +396,6 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
   const fmtUSDVal = (usd: number) => `${sym} ${usd.toLocaleString('en-US', money2)}`;
   const fmtINRVal = (inr: number) => `${sym} ${inr.toLocaleString('en-IN', money2)}`;
 
-  /** Format a single INR value */
-  const fmt = (inr: number) => {
-    if (isUnpriced) return 'Quoted';
-    if (isIntl) return fmtUSDVal(toUSD(inr));
-    return fmtINRVal(inr);
-  };
-
   /** Format a quoted unit price */
   const fmtUnit = (inr: number) => {
     if (isUnpriced) return 'Quoted';
@@ -439,10 +432,18 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
   // ── Compute display values ──
   const packing = quote.packing_price || 0;
   const freight = quote.freight_price || 0;
-  // Two titles sharing one price.
-  const customLabel = customPricingLabel(quote.custom_pricing_title, quote.custom_pricing_title_2);
-  const customExtra = quote.custom_pricing_price || 0;
+  // Custom pricing: title 1 labels the charge row beside its price; title 2
+  // labels the final total row, the way Ex-Works and F.O.R. get their own.
+  const isCustom = quote.pricing_type === 'custom';
+  const customChargeTitle = quote.custom_pricing_title?.trim() ?? '';
+  const customTotalTitle = quote.custom_pricing_title_2?.trim() || 'Total Price';
+  const customExtra = isCustom ? quote.custom_pricing_price || 0 : 0;
   const isForSite = quote.pricing_type === 'for-site';
+  const finalTotalLabel = isForSite
+    ? 'Total F.O.R. Site Price (Excluding Insurance)'
+    : isCustom
+      ? customTotalTitle
+      : 'Total Ex-works Price(Excluding Freight/Insurance)';
 
   // For both INR and USD: compute product subtotal from individual products
   // (quote.subtotal_inr includes packing/freight/custom — can't use it as "Ex-Works")
@@ -634,9 +635,9 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
               <Text style={s.totValue}>{fmtDisplay(freightDisplay)}</Text>
             </View>
           )}
-          {customLabel && customExtra > 0 && (
+          {isCustom && customChargeTitle && customExtra > 0 && (
             <View style={s.totRow}>
-              <Text style={s.totLabel}>{customLabel}</Text>
+              <Text style={s.totLabel}>{customChargeTitle}</Text>
               <Text style={s.totValue}>{fmtDisplay(customExtraDisplay)}</Text>
             </View>
           )}
@@ -647,7 +648,7 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
             </View>
           )}
           <View style={[s.totRow, { borderBottomWidth: 0 }]}>
-            <Text style={[s.totLabel, s.totFinal]}>{isForSite ? 'Total F.O.R. Site Price (Excluding Insurance)' : 'Total Ex-works Price(Excluding Freight/Insurance)'}</Text>
+            <Text style={[s.totLabel, s.totFinal]}>{finalTotalLabel}</Text>
             <Text style={[s.totValue, s.totFinal]}>{fmtDisplay(grandTotalDisplay)}</Text>
           </View>
         </View>
@@ -675,10 +676,13 @@ export function CompleteQuotePDF({ quote, mode = 'complete', customer, products,
             <Text style={s.termLabel}>Payment Terms</Text>
             <Text style={s.termValue}>{paymentTerms}</Text>
           </View>
+          {/* Freight is only ever charged on F.O.R. quotes (shown in the totals
+              above). A non-F.O.R. quote may still carry a stale freight_price
+              from an earlier pricing-type switch, so never present it here. */}
           {!isForSite && (
             <View style={s.termRow} wrap={false}>
               <Text style={s.termLabel}>Freight</Text>
-              <Text style={s.termValue}>{quote.freight_price > 0 ? `Included: ${fmt(quote.freight_price)}` : 'To be borne by buyer'}</Text>
+              <Text style={s.termValue}>To be borne by buyer</Text>
             </View>
           )}
           <View style={s.termRow} wrap={false}>

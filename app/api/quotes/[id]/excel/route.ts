@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import * as XLSX from 'xlsx';
 import { calculateQuoteTotal, convertToUSD } from '@/lib/pricingEngine';
-import { customPricingLabel } from '@/lib/quoteHelpers';
 
 export async function GET(
   request: NextRequest,
@@ -83,8 +82,8 @@ export async function GET(
     const subtotalProducts = productList.reduce((s, p) => s + Number(p.line_total_inr ?? 0), 0);
     const freight = quote.pricing_type === 'for-site' ? Number(quote.freight_price ?? 0) : 0;
     const packing = Number(quote.packing_price ?? 0);
-    // Custom pricing shows two titles under one shared price.
-    const customLabel = customPricingLabel(quote.custom_pricing_title, quote.custom_pricing_title_2);
+    // Title 1 labels the custom charge row; title 2 is the PDF's total label.
+    const customLabel = quote.custom_pricing_title?.trim() ?? '';
     const customCharge = quote.pricing_type === 'custom' ? Number(quote.custom_pricing_price ?? 0) : 0;
     const customItems = customLabel && customCharge > 0
       ? [{ name: customLabel, price: customCharge }]

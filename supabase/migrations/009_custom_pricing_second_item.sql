@@ -3,10 +3,10 @@
 -- ============================================================
 
 -- Custom pricing previously held a single title + price (migration 007).
--- A quote needs to name two custom charges (e.g. "Installation Charges"
--- and "Supervision Charges") that share ONE price, so only a second title
--- is added — the existing custom_pricing_price covers both.
--- The second title is optional.
+-- A second title is added with a different role — there is still one price:
+--   custom_pricing_title   → label of the custom charge row, beside its price
+--   custom_pricing_title_2 → label of the quote's final total row on the PDF
+--                            (the custom equivalent of "Total Ex-works Price")
 
 ALTER TABLE quotes ADD COLUMN IF NOT EXISTS custom_pricing_title_2 TEXT;
 

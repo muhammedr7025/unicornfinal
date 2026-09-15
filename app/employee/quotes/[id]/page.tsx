@@ -11,7 +11,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import Link from 'next/link';
 import { use } from 'react';
 import { convertToUSD, lineToUSD } from '@/lib/pricingEngine';
-import { formatDeliveryText, customPricingLabel } from '@/lib/quoteHelpers';
+import { formatDeliveryText } from '@/lib/quoteHelpers';
 import type { Quote, QuoteProduct, Customer } from '@/types';
 
 type QuoteDetail = Quote & { customer: Customer };
@@ -148,8 +148,8 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
   const productSubtotalUSD = products.reduce((s, p) => s + lineToUSD(Number(p.unit_price_inr ?? 0), p.quantity, exchangeRate), 0);
   const packingPrice = Number(quote.packing_price ?? 0);
   const freightPrice = Number(quote.freight_price ?? 0);
-  // Custom pricing shows two titles under one shared price.
-  const customLabel = customPricingLabel(quote.custom_pricing_title, quote.custom_pricing_title_2);
+  // Title 1 labels the custom charge row; title 2 is the PDF's total label.
+  const customLabel = quote.custom_pricing_title?.trim() ?? '';
   const customPricingPrice = Number(quote.custom_pricing_price ?? 0);
   const taxINR = Number(quote.tax_amount_inr ?? 0);
   const grandTotalINR = Number(quote.grand_total_inr ?? 0);
@@ -383,7 +383,7 @@ export default function EmployeeQuoteDetailPage({ params }: { params: Promise<{ 
                     </TableRow>
                   )}
 
-                  {/* Custom pricing row — both titles, one price */}
+                  {/* Custom pricing charge row */}
                   {quote.pricing_type === 'custom' && customLabel && customPricingPrice > 0 && (
                     <TableRow className="bg-muted/20">
                       <TableCell colSpan={isIntl ? 6 : 5} className="text-right font-medium">{customLabel}:</TableCell>

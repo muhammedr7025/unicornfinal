@@ -18,7 +18,6 @@ import {
   Settings2, Package, Calculator, CheckCircle, FileText, AlertTriangle
 } from 'lucide-react';
 import { calculateProductPrice, calculateQuoteTotal, convertToUSD, lineToUSD } from '@/lib/pricingEngine';
-import { customPricingLabel } from '@/lib/quoteHelpers';
 import type { Customer } from '@/types';
 
 // REMOVED: const TRIM_TYPES and const SEAL_TYPES — now loaded from DB
@@ -495,7 +494,8 @@ export default function NewQuotePage() {
     if (store.packing_price <= 0) { toast.error('Packing price is required and must be > 0'); return; }
     if (!store.delivery_text.trim()) { toast.error('Delivery timeline is required'); return; }
     if (store.pricing_type === 'for-site' && store.freight_price <= 0) { toast.error('Freight price is required for F.O.R. pricing'); return; }
-    if (store.pricing_type === 'custom' && !store.custom_pricing_title.trim()) { toast.error('Custom pricing title 1 is required'); return; }
+    if (store.pricing_type === 'custom' && !store.custom_pricing_title.trim()) { toast.error('Custom pricing charge title is required'); return; }
+    if (store.pricing_type === 'custom' && !store.custom_pricing_title_2.trim()) { toast.error('Custom pricing total label is required'); return; }
     const paymentTotal = store.payment_advance_pct + store.payment_approval_pct + store.payment_despatch_pct;
     if (paymentTotal !== 100) { toast.error('Payment terms must total exactly 100%'); return; }
     if (isIntl && exchangeRate <= 0) { toast.error('Dollar rate is required and must be > 0'); return; }
@@ -517,10 +517,10 @@ export default function NewQuotePage() {
       // Calculate totals
       const customer = customers.find(c => c.id === store.customer_id);
       const lineItems = store.products.map(p => ({ lineTotal: p.line_total }));
-      // Two titles, one price — a single charge on the quote total.
+      // One custom charge, labelled by title 1.
       const customItems = store.pricing_type === 'custom' && store.custom_pricing_title.trim()
         ? [{
-            name: customPricingLabel(store.custom_pricing_title, store.custom_pricing_title_2),
+            name: store.custom_pricing_title.trim(),
             price: store.custom_pricing_price,
           }]
         : [];
@@ -551,7 +551,9 @@ export default function NewQuotePage() {
         custom_pricing_title: store.pricing_type === 'custom' ? store.custom_pricing_title.trim() : null,
         custom_pricing_title_2: store.pricing_type === 'custom' && store.custom_pricing_title_2.trim() ? store.custom_pricing_title_2.trim() : null,
         custom_pricing_price: store.pricing_type === 'custom' ? store.custom_pricing_price : 0,
-        freight_price: store.freight_price,
+        // Freight only exists for F.O.R. quotes. The field keeps its value if
+        // the user switches pricing type, so don't persist a stale amount.
+        freight_price: store.pricing_type === 'for-site' ? store.freight_price : 0,
         packing_price: store.packing_price,
         exchange_rate_snapshot: exchangeRate,
         notes: store.notes || null,
@@ -744,7 +746,8 @@ export default function NewQuotePage() {
       if (store.packing_price <= 0) { toast.error('Packing price is required and must be > 0'); return false; }
       if (!store.delivery_text.trim()) { toast.error('Delivery timeline is required (e.g. "4-6 working weeks")'); return false; }
       if (store.pricing_type === 'for-site' && store.freight_price <= 0) { toast.error('Freight price is required for F.O.R. pricing'); return false; }
-      if (store.pricing_type === 'custom' && !store.custom_pricing_title.trim()) { toast.error('Custom pricing title 1 is required'); return false; }
+      if (store.pricing_type === 'custom' && !store.custom_pricing_title.trim()) { toast.error('Custom pricing charge title is required'); return false; }
+      if (store.pricing_type === 'custom' && !store.custom_pricing_title_2.trim()) { toast.error('Custom pricing total label is required'); return false; }
       if (store.pricing_type === 'custom' && store.custom_pricing_price <= 0) { toast.error('Custom pricing price is required and must be > 0'); return false; }
       const paymentTotal = store.payment_advance_pct + store.payment_approval_pct + store.payment_despatch_pct;
       if (paymentTotal !== 100) { toast.error(`Payment terms must total 100% (currently ${paymentTotal}%)`); return false; }
@@ -1015,25 +1018,28 @@ function StepTermsPricing({ customers, exchangeRate }: { customers: Customer[]; 
               </Select>
             </div>
 
-            {/* Custom pricing — two titles sharing one price */}
+            {/* Custom pricing — title 1 labels the charge, title 2 labels the
+                quote's final total on the PDF (like "Total Ex-works Price") */}
             {store.pricing_type === 'custom' && (
               <div className="rounded-lg border-2 border-violet-200 bg-violet-50/30 dark:bg-violet-950/10 p-4 space-y-3">
                 <p className="text-xs font-bold text-violet-800 dark:text-violet-400 uppercase tracking-wider">Custom Pricing</p>
                 <div className="space-y-2">
-                  <Label className="text-xs">Title 1 *</Label>
+                  <Label className="text-xs">Charge title *</Label>
                   <Input
                     value={store.custom_pricing_title}
                     onChange={(e) => store.setQuoteSettings({ custom_pricing_title: e.target.value })}
                     placeholder="e.g. Installation Charges"
                   />
+                  <p className="text-[10px] text-muted-foreground">Shown beside the price below.</p>
                 </div>
                 <div className="space-y-2">
-                  <Label className="text-xs">Title 2 <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                  <Label className="text-xs">Total label *</Label>
                   <Input
                     value={store.custom_pricing_title_2}
                     onChange={(e) => store.setQuoteSettings({ custom_pricing_title_2: e.target.value })}
-                    placeholder="e.g. Supervision Charges"
+                    placeholder="e.g. Total Price incl. Installation"
                   />
+                  <p className="text-[10px] text-muted-foreground">Shown on the final total row of the PDF.</p>
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs">{isIntl ? 'Price (USD $) *' : 'Price (₹) *'}</Label>
@@ -1061,7 +1067,6 @@ function StepTermsPricing({ customers, exchangeRate }: { customers: Customer[]; 
                   {isIntl && exchangeRate > 0 && store.custom_pricing_price > 0 && (
                     <p className="text-[10px] text-muted-foreground">= ₹{store.custom_pricing_price.toLocaleString('en-IN', MONEY2)} INR</p>
                   )}
-                  <p className="text-[10px] text-muted-foreground">This one price covers both titles above.</p>
                 </div>
               </div>
             )}
@@ -2310,8 +2315,8 @@ function StepReview({ customers, exchangeRate }: { customers: Customer[]; exchan
   const productSubtotalINR = store.products.reduce((s, p) => s + p.line_total, 0);
   const freightINR = store.pricing_type === 'for-site' ? store.freight_price : 0;
   const packingINR = store.packing_price;
-  // Two titles, one price — a single charge on the quote total.
-  const customLabel = customPricingLabel(store.custom_pricing_title, store.custom_pricing_title_2);
+  // Title 1 labels the custom charge row (title 2 is the PDF's total label).
+  const customLabel = store.custom_pricing_title.trim();
   const customChargeINR = store.pricing_type === 'custom' ? store.custom_pricing_price : 0;
   const taxableINR = productSubtotalINR + freightINR + packingINR + customChargeINR;
   const taxINR = isIntl ? 0 : taxableINR * 0.18;
