@@ -360,13 +360,11 @@ export async function GET(
         const ppRate = rateOf(plugMat);
         sheetData.push(row('Pilot Plug', plugMat?.material_name ?? 'N/A', pilotW, ppRate, pilotW != null ? pilotW * ppRate : null, 0, pilotCost, 'Plug material rate'));
       }
-      // Actuator and handwheel count toward MANUFACTURING cost (and take the
-      // manufacturing margin) — only accessories are bought-out.
       if (p.has_actuator && actCost > 0) {
-        sheetData.push(fixedRow('Actuator', act ? `${act.type} — ${act.model}` : 'N/A', act ? Number(act.fixed_price) : null, actCost, 'Fixed price · manufacturing cost'));
+        sheetData.push(fixedRow('Actuator', act ? `${act.type} — ${act.model}` : 'N/A', act ? Number(act.fixed_price) : null, actCost, 'Bought-out'));
       }
       if (p.has_handwheel && hwCost > 0) {
-        sheetData.push(fixedRow('Handwheel', hw ? `${hw.type} — ${hw.model}` : 'N/A', hw ? Number(hw.fixed_price) : null, hwCost, 'Fixed price · manufacturing cost'));
+        sheetData.push(fixedRow('Handwheel', hw ? `${hw.type} — ${hw.model}` : 'N/A', hw ? Number(hw.fixed_price) : null, hwCost, 'Bought-out'));
       }
       for (const t of pTesting as { item_name: string; price: number | string }[]) {
         sheetData.push(['Testing', t.item_name, '—', '—', '—', '—', Number(t.price), 'Fixed price · manufacturing cost']);
